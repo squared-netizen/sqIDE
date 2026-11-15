@@ -9,14 +9,15 @@ sha256=
 top=make-$version
 depends=""
 keep="bin/make share/licenses/make"
-# Recipes run under /system/bin/sh: Android has no /bin/sh.
+# Recipes run under /system/bin/sh: Android has no /bin/sh. No confstr:
+# bionic has neither it nor _CS_PATH.
 recipe_patch() {
   sed -i 's|default_shell = "/bin/sh"|default_shell = "/system/bin/sh"|' src/job.c
   grep -q 'default_shell = "/system/bin/sh"' src/job.c
 }
 recipe_build() {
   ./configure ${SQ_HOST_TRIPLE:+--host=$SQ_HOST_TRIPLE --build=$(sh ./build-aux/config.guess 2>/dev/null || sh ./support/config.guess)} \
-    --prefix="$SQ_PREFIX" --disable-nls --without-guile
+    --prefix="$SQ_PREFIX" --disable-nls --without-guile ac_cv_func_confstr=no
   make -j"$JOBS"
   make install DESTDIR="$dest"
 }
