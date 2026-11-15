@@ -18,8 +18,10 @@
 #                                       build/packages/host/: to check a recipe
 #                                       where there is no NDK (nothing packed
 #                                       into the app)
-#   bash packages/build.sh --tag        the name of CI's release for these
-#                                       recipes (tools/fetch_packages.sh)
+#   bash packages/build.sh --keys       each package's name, version and key
+#                                       (tools/fetch_packages.sh, CI)
+#   bash packages/build.sh --index      write the index for the archives
+#                                       already in sq_android/assets/packages/
 #   bash packages/build.sh --list       the packages and their versions
 #
 # Two ways to fill sq_android/assets/packages/, both starting with a
@@ -66,7 +68,8 @@ names=()
 while [ $# -gt 0 ]; do
   case $1 in
     --host-test) HOST_TEST=1 ;;
-    --tag) MODE=tag ;;
+    --keys) MODE=keys ;;
+    --index) MODE=index ;;
     --list)
       for name in $ORDER; do
         (. "$RECIPES/$name/recipe.sh"; printf '  %-10s %s\n' "$name" "$version")
@@ -83,19 +86,55 @@ done
 
 need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is missing${2:+ (Termux: pkg install $2)}"; }
 
-# The release these recipes need: packages-<16 hex digits>. A sha256 of each
-# file that decides what is built (not the READMEs), by path, and the API
-# level. The same on the phone and on CI for the same files.
-packages_tag() {
-  local key
-  key=$(cd "$ROOT" &&
-        { find packages terminfo/sqterm.ti -type f ! -name '*.md' | LC_ALL=C sort |
-            while read -r path; do printf '%s %s\n' "$(sha256sum "$path" | cut -d ' ' -f 1)" "$path"; done
-          printf 'api %s\n' "$SQ_API"; } | sha256sum | cut -c 1-16)
-  printf 'packages-%s\n' "$key"
+# A package's key: 16 hex digits of a sha256 over what decides what it is.
+# Its recipe folder (not the READMEs), the files outside it it names in
+# `inputs`, this script, its source's line in sources.lock, the API level,
+# and the keys of what it depends on. A recipe changed rebuilds that package
+# and what depends on it, nothing else: CI names each archive after its key
+# (<name>-<version>-<key>.tar.zst), and a build here skips a package whose
+# key and archive are already there. The same on the phone and on CI.
+package_key() (
+  . "$RECIPES/$1/recipe.sh"
+  {
+    { (cd "$ROOT" && find "packages/$1" -type f ! -name '*.md')
+      for path in ${inputs:-}; do echo "$path"; done
+      echo packages/build.sh; } | LC_ALL=C sort |
+      while read -r path; do printf '%s %s\n' "$(sha256sum "$ROOT/$path" | cut -d ' ' -f 1)" "$path"; done
+    awk -v f="$file" '$1 == f' "$LOCK"
+    printf 'api %s\n' "$SQ_API"
+    for dependency in $depends; do printf 'depends %s %s\n' "$dependency" "$(package_key "$dependency")"; done
+  } | sha256sum | cut -c 1-16
+)
+
+# The index the app reads: a line a package, "name version file sha", in the
+# order they install. The app installs again when this file changes.
+write_index() {
+  local name archive base version
+  {
+    printf 'sqterm packages 1\n'
+    for name in $ORDER; do
+      for archive in "$OUT/$name"-*.tar.zst; do
+        [ -f "$archive" ] || continue
+        base=$(basename "$archive")
+        version=${base#"$name"-}
+        version=${version%.tar.zst}
+        printf '%s %s %s %s\n' "$name" "$version" "$base" "$(sha256sum "$archive" | cut -c 1-16)"
+      done
+    done
+  } > "$OUT/index.new"
+  mv "$OUT/index.new" "$OUT/index"
+  say "index: $(($(wc -l < "$OUT/index") - 1)) package(s) in ${OUT#"$ROOT"/}"
 }
 
-if [ "$MODE" = tag ]; then packages_tag; exit 0; fi
+case $MODE in
+  keys)
+    for name in $ORDER; do
+      printf '%s %s %s\n' "$name" "$(. "$RECIPES/$name/recipe.sh"; echo "$version")" "$(package_key "$name")"
+    done
+    exit 0 ;;
+  index) mkdir -p "$OUT"; write_index; exit 0 ;;
+esac
+
 
 for tool in tar xz zstd make sha256sum; do need "$tool" "$tool"; done
 need clang clang
@@ -176,11 +215,19 @@ build_one() {
   local recipe_dir=$RECIPES/$name
   # The recipe's variables and functions, fresh for each package.
   unset -f recipe_patch recipe_build recipe_after 2>/dev/null || true
-  version= url= mirrors= sha256= file= top= depends= keep=
+  version= url= mirrors= sha256= file= top= depends= keep= inputs=
   . "$recipe_dir/recipe.sh"
-  say "$name $version"
+  local here=$WORK/$name key
+  key=$(package_key "$name")
+  # Up to date: built from this key, its archive and its install still here
+  # (a package that depends on it builds against the install).
+  if [ "$(cat "$here/key" 2>/dev/null)" = "$key" ] && [ -f "$OUT/$name-$version.tar.zst" ] &&
+     [ -d "$here/dest" ]; then
+    say "$name $version: up to date ($key)"
+    return
+  fi
+  say "$name $version ($key)"
   check_source
-  local here=$WORK/$name
   rm -rf "$here"
   mkdir -p "$here"
   tar -xf "$SOURCES/$file" -C "$here"
@@ -222,23 +269,9 @@ build_one() {
   # Older versions of it go.
   for old in "$OUT/$name"-*.tar.zst; do [ "$old" = "$archive" ] || rm -f "$old"; done
   say "$name: $(du -k "$archive" | cut -f 1) KB packed, $(du -sk "$installed" | cut -f 1) KB installed"
+  echo "$key" > "$here/key"
 }
 
 for package in "${names[@]}"; do build_one "$package"; done
 
-# The index the app reads: a line a package, "name version file", in the
-# order they install. The app installs again when this file changes.
-{
-  printf 'sqterm packages 1\n'
-  for name in $ORDER; do
-    for archive in "$OUT/$name"-*.tar.zst; do
-      [ -f "$archive" ] || continue
-      base=$(basename "$archive")
-      version=${base#"$name"-}
-      version=${version%.tar.zst}
-      printf '%s %s %s %s\n' "$name" "$version" "$base" "$(sha256sum "$archive" | cut -c 1-16)"
-    done
-  done
-} > "$OUT/index.new"
-mv "$OUT/index.new" "$OUT/index"
-say "index: $(($(wc -l < "$OUT/index") - 1)) package(s) in ${OUT#"$ROOT"/}"
+write_index

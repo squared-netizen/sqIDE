@@ -11,14 +11,16 @@
 #                                              build here: then make packages
 #   tools/fetch_packages.sh --dry-run [...]    say what it would download
 #
-# The packages: CI (.github/workflows/packages.yml) publishes a GitHub
-# release named after the recipes, packages-<key>
-# (`bash packages/build.sh --tag`). This downloads the one for the recipes as
-# they are in this folder, checks each file against the release's
-# SHA256SUMS, and only then replaces what was in sq_android/assets/packages/.
-# The repository is public: no token. Those sha256s guard against a broken
+# The packages: CI (.github/workflows/packages.yml) builds each package once
+# per key (`bash packages/build.sh --keys`: a sha256 of its recipe, what it
+# depends on and the API level) and adds it to the GitHub release named
+# `packages` as <name>-<version>-<key>.tar.zst, with a .sha256 beside it. This
+# downloads the one for each recipe as it is in this folder, checks each
+# against its .sha256, and only once all have arrived and matched replaces
+# what was in sq_android/assets/packages/ and writes the index. The
+# repository is public: no token. Those sha256s guard against a broken
 # download; they come from the same release, so they are not a signature. A
-# recipe changed here has no release until CI builds it from main: fetch its
+# recipe changed here has no archive until CI builds it from main: fetch its
 # sources and build it here instead.
 #
 # The sources: each recipe's url (or its mirrors), checked against the
@@ -28,7 +30,7 @@
 #
 # Environment: SQ_PACKAGES_REPO (default squared-netizen/sqterm), or
 # SQ_PACKAGES_URL for the whole of it (a mirror, or a test):
-# <url>/<tag>/<file>.
+# <url>/packages/<file>.
 #
 # Runs from anywhere: the repo is found from this script's own path. Needs
 # curl and sha256sum (Termux: pkg install curl).
@@ -66,35 +68,38 @@ need curl curl
 need sha256sum coreutils
 
 fetch_release() {
-  local tag base staging sum file
-  tag=$(bash "$RECIPES/build.sh" --tag)
-  base=$SQ_PACKAGES_URL/$tag
-  say release "$tag"
-  say from "$SQ_PACKAGES_URL"
-  if [ "$DRY" = 1 ]; then say into "${OUT#"$ROOT"/}/ (dry run: nothing downloaded)"; return; fi
+  local base=$SQ_PACKAGES_URL/packages staging name version key asset
+  local -a wanted=()
+  while read -r name version key; do wanted+=("$name $version $key"); done \
+    < <(bash "$RECIPES/build.sh" --keys)
+  say release "packages ($SQ_PACKAGES_URL)"
+  if [ "$DRY" = 1 ]; then
+    for line in "${wanted[@]}"; do read -r name version key <<< "$line"; say would "$name-$version-$key.tar.zst"; done
+    return
+  fi
   staging=$ROOT/build/packages/download
   rm -rf "$staging"
   mkdir -p "$staging"
-  if ! get "$staging/SHA256SUMS" "$base/SHA256SUMS"; then
-    rm -rf "$staging"
-    fail "no release $tag: CI builds one when these recipes reach main
+  for line in "${wanted[@]}"; do
+    read -r name version key <<< "$line"
+    asset=$name-$version-$key.tar.zst
+    say download "$asset"
+    get "$staging/$asset" "$base/$asset" && get "$staging/$asset.sha256" "$base/$asset.sha256" || {
+      rm -rf "$staging"
+      fail "no $asset in the release: CI builds it when this recipe reaches main
           (github.com/$SQ_PACKAGES_REPO/actions). Or build here:
-          tools/fetch_packages.sh --sources; make packages"
-  fi
-  while read -r sum file; do
-    case $file in
-      *[!A-Za-z0-9._+-]* | '' | .*) fail "$tag: a file name that is not a package's in SHA256SUMS: $file" ;;
-    esac
-    say download "$file"
-    get "$staging/$file" "$base/$file" || fail "$tag: could not download $file"
-  done < "$staging/SHA256SUMS"
-  ( cd "$staging" && sha256sum -c --quiet SHA256SUMS ) || fail "$tag: a file does not match SHA256SUMS"
-  [ -f "$staging/index" ] || fail "$tag: the release has no index"
+          tools/fetch_packages.sh --sources; make packages"; }
+    ( cd "$staging" && sha256sum -c --quiet "$asset.sha256" ) || fail "$asset does not match its .sha256"
+  done
   mkdir -p "$OUT"
   rm -f "$OUT"/*.tar.zst "$OUT/index"
-  mv "$staging"/*.tar.zst "$staging/index" "$OUT"/
+  for line in "${wanted[@]}"; do
+    read -r name version key <<< "$line"
+    mv "$staging/$name-$version-$key.tar.zst" "$OUT/$name-$version.tar.zst"
+  done
   rm -rf "$staging"
-  say packages "$(($(wc -l < "$OUT/index") - 1)) in ${OUT#"$ROOT"/}, checked"
+  bash "$RECIPES/build.sh" --index > /dev/null
+  say packages "${#wanted[@]} in ${OUT#"$ROOT"/}, checked"
 }
 
 fetch_source() {

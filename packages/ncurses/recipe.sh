@@ -18,6 +18,7 @@ mirrors="https://invisible-mirror.net/archives/ncurses/$file"
 sha256=
 top=ncurses-$version
 depends=
+inputs=terminfo/sqterm.ti
 keep="bin/tic bin/infocmp bin/tput bin/clear bin/reset bin/tset bin/toe share/terminfo
       share/licenses/ncurses"
 
