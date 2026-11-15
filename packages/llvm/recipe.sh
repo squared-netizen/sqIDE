@@ -6,7 +6,9 @@
 # linked in. clang defaults to libc++, compiler-rt and lld, and to sqterm's
 # target (aarch64-linux-android28). The C++ library and runtimes for what
 # clang builds, the sysroot, and the other tools (clangd, clang-tidy,
-# clang-doc, lldb, compiler-rt) come in later packages.
+# clang-doc, lldb, compiler-rt) come in later packages. No plugins: a
+# plugin is a shared library that leaves clang's symbols for load time, which
+# the NDK's link refuses (and one binary has none to give).
 #
 # Large: not in the APK (bundled=no). tools/fetch_packages.sh --get llvm
 # downloads it; in sqterm, pkg install it --consume.
@@ -57,6 +59,7 @@ recipe_build() {
       -DLLVM_NATIVE_TOOL_DIR="$PWD/../native/bin" \
       -DCROSS_TOOLCHAIN_FLAGS_NATIVE="-DCMAKE_C_COMPILER=${CC_FOR_BUILD:-cc};-DCMAKE_CXX_COMPILER=${CXX_FOR_BUILD:-c++}" \
       -DLLVM_TOOL_LLVM_DRIVER_BUILD=ON -DLLVM_INSTALL_TOOLCHAIN_ONLY=ON \
+      -DLLVM_ENABLE_PLUGINS=OFF -DCLANG_PLUGIN_SUPPORT=OFF -DCLANG_BUILD_EXAMPLES=OFF \
       -DCLANG_DEFAULT_CXX_STDLIB=libc++ -DCLANG_DEFAULT_RTLIB=compiler-rt \
       -DCLANG_DEFAULT_UNWINDLIB=libunwind -DCLANG_DEFAULT_LINKER=lld \
       -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
