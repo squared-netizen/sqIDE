@@ -1,33 +1,45 @@
 #!/usr/bin/env bash
-# packages/build.sh: build sqterm's packages for its prefix (Sprint 12.5).
+# packages/build.sh: sqterm's packages for its prefix (Sprint 12.5).
 #
 # Each package is a recipe (packages/<name>/recipe.sh): its source's URL and
-# sha256, how to build it, and what of its install goes in the package. This
-# script downloads the source, checks it, builds it with the NDK for the
-# oldest Android sqterm runs on (API 22, so the tablet too), and packs what
-# the recipe keeps as <name>-<version>.tar.zst in sq_android/assets/packages/,
-# with an index the app reads. The app unpacks them into its prefix the first
-# time it starts (and again when the index changes).
+# sha256, how to build it, and what of its install goes in the package. They
+# are built with the NDK for API 28 (Android 9) and packed as
+# <name>-<version>.tar.zst in sq_android/assets/packages/, with an index the
+# app reads. The app unpacks them into its prefix the first time it starts
+# (and again when the index changes).
 #
-#   bash packages/build.sh              every package, in order (ncurses zsh)
-#   bash packages/build.sh zsh          one (what it depends on must be built)
-#   bash packages/build.sh --host-test  for this machine instead, into
-#                                       build/packages/host/: to check a recipe
-#                                       where there is no NDK (nothing packed
-#                                       into the app)
-#   bash packages/build.sh --list       the packages and their versions
+# GitHub Actions builds them (.github/workflows/packages.yml, decided
+# 2026-11-04) and publishes a release named after the recipes: packages-<key>,
+# the key a sha256 of everything here that decides what is built (this script,
+# the recipes and their files, sources.lock, terminfo/sqterm.ti, the API
+# level). By default this script downloads the release for the recipes as
+# they are in this folder, and checks each file against the release's
+# SHA256SUMS. A recipe changed here and not yet built by CI has no release:
+# build it here.
 #
-# Runs on the phone (Termux: clang, make, curl, tar, xz, zstd) with the NDK the
-# APK builds use ($ANDROID_NDK_HOME, or the newest under
-# $PREFIX/opt/android-sdk/ndk). The same script is meant for GitHub Actions
-# later (12.5, decided 2026-11-04): nothing in it is the phone's alone, but a
-# build for Android on another machine runs nothing it built, and the recipes
-# say where that matters.
+#   bash packages/build.sh                    download the release (make packages)
+#   bash packages/build.sh --build [name...]  build here instead, every package
+#                                             or the ones named (what they
+#                                             depend on must be built)
+#                                             (make packages-build)
+#   bash packages/build.sh --host-test        build for this machine instead,
+#                                             into build/packages/host/: to check
+#                                             a recipe where there is no NDK
+#                                             (nothing packed into the app)
+#   bash packages/build.sh --tag              the release these recipes need
+#   bash packages/build.sh --list             the packages and their versions
+#
+# A build runs on the phone (Termux: clang, make, curl, tar, xz, zstd) with the
+# NDK the APK builds use ($ANDROID_NDK_HOME, or the newest under
+# $PREFIX/opt/android-sdk/ndk), and on CI's x86 Linux with the NDK's clang.
+# Off the phone it is a cross build (SQ_CROSS=1): nothing it builds can run
+# there, so the recipes give configure its answers and build what they must
+# run (ncurses' tic) for the build machine too.
 #
 # Sources are kept in build/packages/sources/ and checked against the
 # recipe's sha256. A recipe with none (no checksum was published) is checked
 # against packages/sources.lock, which the first download writes: commit it,
-# and later downloads must match.
+# and later downloads must match. SQ_LOCKED=1 (CI) refuses to write it.
 #
 # Idempotent: each build starts from a fresh copy of the source; the package
 # is written beside its old one and moved into place.
@@ -44,8 +56,17 @@ ORDER="ncurses zsh"
 # under. The app's getFilesDir() is /data/user/0/dev.squared.sqterm/files,
 # the same directory as /data/data/...; Termux names its own the same way.
 SQ_PREFIX=/data/data/dev.squared.sqterm/files/usr
-SQ_API=${SQ_MIN_SDK:-22}
+# The packages' API level: the oldest Android they run on. 28, not sqterm's
+# SQ_MIN_SDK: the Android 5.1 tablet is no longer a target (2026-11-15), and
+# 28 is sqterm's target SDK, which it must keep to run programs from its own
+# files.
+SQ_API=28
 OUT=$ROOT/sq_android/assets/packages
+# Where releases come from (a public repository: no token). SQ_PACKAGES_URL
+# replaces the whole of it (a mirror, or a test): <url>/<tag>/<file>.
+SQ_PACKAGES_REPO=${SQ_PACKAGES_REPO:-squared-netizen/sqterm}
+SQ_PACKAGES_URL=${SQ_PACKAGES_URL:-https://github.com/$SQ_PACKAGES_REPO/releases/download}
+MODE=fetch
 HOST_TEST=0
 
 say() { printf '== %s\n' "$*"; }
@@ -54,28 +75,84 @@ fail() { printf 'packages: %s\n' "$*" >&2; exit 1; }
 names=()
 while [ $# -gt 0 ]; do
   case $1 in
-    --host-test) HOST_TEST=1 ;;
+    --build) MODE=build ;;
+    --host-test) MODE=build; HOST_TEST=1 ;;
+    --tag) MODE=tag ;;
     --list)
       for name in $ORDER; do
         (. "$RECIPES/$name/recipe.sh"; printf '  %-10s %s\n' "$name" "$version")
       done
       exit 0 ;;
-    -h | --help) sed -n '2,32p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,46p' "$0"; exit 0 ;;
     -*) fail "unknown option: $1 (see --help)" ;;
     *) [ -f "$RECIPES/$1/recipe.sh" ] || fail "no recipe: packages/$1/recipe.sh"
        names+=("$1") ;;
   esac
   shift
 done
+[ ${#names[@]} -eq 0 ] || [ "$MODE" = build ] || fail "naming a package builds it: --build ${names[*]}"
 [ ${#names[@]} -gt 0 ] || read -r -a names <<< "$ORDER"
 
 need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is missing${2:+ (Termux: pkg install $2)}"; }
+
+# The release these recipes need: packages-<16 hex digits>. A sha256 of each
+# file that decides what is built (not the READMEs), by path, and the API
+# level. The same on the phone and on CI for the same files.
+packages_tag() {
+  local key
+  key=$(cd "$ROOT" &&
+        { find packages terminfo/sqterm.ti -type f ! -name '*.md' | LC_ALL=C sort |
+            while read -r path; do printf '%s %s\n' "$(sha256sum "$path" | cut -d ' ' -f 1)" "$path"; done
+          printf 'api %s\n' "$SQ_API"; } | sha256sum | cut -c 1-16)
+  printf 'packages-%s\n' "$key"
+}
+
+# Download the release for these recipes into $OUT, every file checked
+# against its SHA256SUMS; what was there before goes only once all of it
+# has arrived and matched.
+fetch_release() {
+  need curl curl
+  need sha256sum coreutils
+  local tag base staging sum file
+  tag=$(packages_tag)
+  base=$SQ_PACKAGES_URL/$tag
+  staging=$WORK/download
+  rm -rf "$staging"
+  mkdir -p "$staging"
+  say "release $tag ($SQ_PACKAGES_URL)"
+  if ! curl -fsSL --retry 3 --connect-timeout 20 -o "$staging/SHA256SUMS" "$base/SHA256SUMS"; then
+    rm -rf "$staging"
+    fail "no release $tag yet: CI builds one when these recipes reach main
+          (github.com/$SQ_PACKAGES_REPO/actions). Or build here: make packages-build"
+  fi
+  while read -r sum file; do
+    case $file in
+      *[!A-Za-z0-9._+-]* | '' | .*) fail "$tag: a file name that is not a package's in SHA256SUMS: $file" ;;
+    esac
+    say "download $file"
+    curl -fsSL --retry 3 --connect-timeout 20 -o "$staging/$file" "$base/$file" ||
+      fail "$tag: could not download $file"
+  done < "$staging/SHA256SUMS"
+  ( cd "$staging" && sha256sum -c --quiet SHA256SUMS ) || fail "$tag: a file does not match SHA256SUMS"
+  [ -f "$staging/index" ] || fail "$tag: the release has no index"
+  mkdir -p "$OUT"
+  rm -f "$OUT"/*.tar.zst "$OUT/index"
+  mv "$staging"/*.tar.zst "$staging/index" "$OUT"/
+  rm -rf "$staging"
+  say "index: $(($(wc -l < "$OUT/index") - 1)) package(s) in ${OUT#"$ROOT"/}"
+}
+
+case $MODE in
+  tag) packages_tag; exit 0 ;;
+  fetch) mkdir -p "$WORK"; fetch_release; exit 0 ;;
+esac
+
 for tool in curl tar xz zstd make sha256sum; do need "$tool" "$tool"; done
 need clang clang
 
-# The toolchain. For Android: this host's clang, aimed at the NDK's sysroot
-# for API $SQ_API (as mk/squared_generated.mk builds the app). Executables
-# carry DT_HASH for Android 5 and 16 KB pages for the devices that have them.
+# The toolchain. For Android: this host's clang (on CI, the NDK's), aimed at
+# the NDK's sysroot for API $SQ_API (as mk/squared_generated.mk builds the
+# app). Executables carry 16 KB pages for the devices that have them.
 if [ "$HOST_TEST" = 1 ]; then
   # Where it will be unpacked, if not here (sqterm's host harness: its files).
   SQ_PREFIX=${SQ_HOST_PREFIX:-$WORK/host/usr}
@@ -84,6 +161,7 @@ if [ "$HOST_TEST" = 1 ]; then
   export CC=${CC:-cc} AR=${AR:-ar} RANLIB=${RANLIB:-ranlib} STRIP=${STRIP:-strip}
   export CFLAGS="-O2" LDFLAGS=""
   SQ_HOST_TRIPLE=
+  SQ_CROSS=0
   say "host test: built for this machine, prefix $SQ_PREFIX"
 else
   NDK=${ANDROID_NDK_HOME:-}
@@ -103,10 +181,14 @@ else
   UNWIND=$(ls -d "$NDK"/toolchains/llvm/prebuilt/*/lib/clang/*/lib/linux/aarch64/libunwind.a 2>/dev/null | head -n 1)
   [ -n "$UNWIND" ] || fail "the NDK at $NDK has no libunwind.a for aarch64"
   export CFLAGS="-O2 -fPIC"
-  export LDFLAGS="-L$(dirname "$UNWIND") -Wl,--hash-style=both -Wl,-z,max-page-size=16384"
+  export LDFLAGS="-L$(dirname "$UNWIND") -Wl,-z,max-page-size=16384"
   # What configure builds to run here (config.guess, a recipe's helpers).
   export CC_FOR_BUILD=${CC_FOR_BUILD:-cc}
-  say "for Android API $SQ_API (arm64), prefix $SQ_PREFIX; NDK $NDK"
+  # On an arm64 Android (the phone) what is built runs here; anywhere else
+  # (CI's x86 Linux) nothing does, and a recipe builds what it must run for
+  # this machine with CC_FOR_BUILD.
+  if [ "$(uname -o 2>/dev/null)" = Android ] && [ "$(uname -m)" = aarch64 ]; then SQ_CROSS=0; else SQ_CROSS=1; fi
+  say "for Android API $SQ_API (arm64), prefix $SQ_PREFIX; NDK $NDK$([ "$SQ_CROSS" = 1 ] && echo '; a cross build')"
 fi
 export CPPFLAGS="" PKG_CONFIG=/bin/false
 JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
@@ -130,7 +212,9 @@ fetch() {
   if [ -z "$expected" ] && [ -f "$LOCK" ]; then
     expected=$(awk -v f="$file" '$1 == f { print $2 }' "$LOCK")
   fi
-  if [ -z "$expected" ]; then
+  if [ -z "$expected" ] && [ "${SQ_LOCKED:-0}" = 1 ]; then
+    fail "$file: no sha256 in the recipe or packages/sources.lock, and SQ_LOCKED=1: build it on the phone once and commit sources.lock"
+  elif [ -z "$expected" ]; then
     printf '%s %s\n' "$file" "$actual" >> "$LOCK"
     say "$file: no published sha256; recorded $actual in packages/sources.lock (commit it)"
   elif [ "$actual" != "$expected" ]; then
@@ -166,7 +250,7 @@ build_one() {
   [ -d "$src" ] || fail "$name: $file has no $top/"
   local saved_cppflags=$CPPFLAGS saved_ldflags=$LDFLAGS
   for dependency in $depends; do use_dependency "$dependency"; done
-  export CPPFLAGS LDFLAGS SQ_PREFIX SQ_HOST_TRIPLE SQ_API JOBS ROOT src dest version
+  export CPPFLAGS LDFLAGS SQ_PREFIX SQ_HOST_TRIPLE SQ_CROSS SQ_API JOBS ROOT src dest version
   # In a bash of its own, so a failing step stops it (set -e does not reach
   # into a command on the left of ||).
   bash -c 'set -euo pipefail; . "$1"; cd "$src"

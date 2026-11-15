@@ -1,0 +1,127 @@
+# sqterm's packages (12.5): built here, published as a release, downloaded by
+# `make packages` on the phone (packages/build.sh, decided 2026-11-04).
+#
+# The release is named after the recipes: packages-<key>, where
+# `bash packages/build.sh --tag` gives the key (a sha256 of the recipes, the
+# script, sources.lock, terminfo/sqterm.ti and the API level). A release that
+# exists is never built again. A pull request builds and keeps the result as
+# a workflow artifact; only main (or a run started by hand) publishes.
+name: packages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/**
+      - terminfo/sqterm.ti
+      - .github/workflows/packages.yml
+  pull_request:
+    paths:
+      - packages/**
+      - terminfo/sqterm.ti
+      - .github/workflows/packages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The NDK the phone builds with ($PREFIX/opt/android-sdk/ndk/<version>).
+  NDK_VERSION: 29.0.14206865
+
+jobs:
+  packages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The release these recipes need
+        id: release
+        run: |
+          tag=$(bash packages/build.sh --tag)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$tag is published already: nothing to build"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "$tag: building"
+          fi
+
+      - name: The NDK, its clang first on PATH
+        if: steps.release.outputs.exists != 'true'
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          ndk=$ANDROID_HOME/ndk/$NDK_VERSION
+          test -d "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
+
+      - name: Tools
+        if: steps.release.outputs.exists != 'true'
+        run: sudo apt-get install -y --no-install-recommends zstd xz-utils
+
+      - name: Sources, kept between runs
+        if: steps.release.outputs.exists != 'true'
+        uses: actions/cache@v4
+        with:
+          path: build/packages/sources
+          key: package-sources-${{ hashFiles('packages/*/recipe.sh', 'packages/sources.lock') }}
+          restore-keys: package-sources-
+
+      - name: Build
+        if: steps.release.outputs.exists != 'true'
+        env:
+          # A source with no sha256 anywhere fails here rather than being
+          # recorded: sources.lock is written on the phone and committed.
+          SQ_LOCKED: "1"
+          CC_FOR_BUILD: gcc
+        run: |
+          clang --version | head -n 1
+          bash packages/build.sh --build
+
+      - name: The build logs, when it failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: build/packages/*/build.log
+          if-no-files-found: ignore
+
+      - name: What the release holds
+        if: steps.release.outputs.exists != 'true'
+        run: |
+          mkdir dist
+          cp sq_android/assets/packages/index sq_android/assets/packages/*.tar.zst dist/
+          cd dist
+          sha256sum index *.tar.zst > SHA256SUMS
+          cat index
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        if: steps.release.outputs.exists != 'true'
+        with:
+          name: ${{ steps.release.outputs.tag }}
+          path: dist/
+
+      - name: Publish
+        if: steps.release.outputs.exists != 'true' && github.event_name != 'pull_request'
+        run: |
+          tag=${{ steps.release.outputs.tag }}
+          {
+            echo "sqterm's packages, built from $GITHUB_SHA for Android API 28 (arm64)."
+            echo
+            echo "On the phone, in sqterm's folder: make packages"
+            echo
+            echo '```'
+            cat dist/index
+            echo '```'
+          } > notes.md
+          gh release create "$tag" dist/* --target "$GITHUB_SHA" --title "$tag" --notes-file notes.md
