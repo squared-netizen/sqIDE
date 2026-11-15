@@ -44,7 +44,7 @@ RECIPES=$ROOT/packages
 WORK=$ROOT/build/packages
 SOURCES=$WORK/sources
 LOCK=$RECIPES/sources.lock
-ORDER="ncurses zsh bash coreutils sed grep findutils gawk make"
+ORDER="ncurses zsh bash coreutils sed grep gawk make"
 
 # Where the app's prefix is: what every program is built to find its files
 # under. The app's getFilesDir() is /data/user/0/dev.squared.sqterm/files,

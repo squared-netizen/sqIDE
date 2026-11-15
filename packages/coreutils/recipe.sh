@@ -11,12 +11,18 @@ depends=""
 keep="bin share/licenses/coreutils"
 # One binary, every command a symbolic link to it (RAM and size; Android
 # refuses hard links). pinky, users, who, uptime: no utmp on Android; stdbuf
-# needs a preloaded library.
+# needs a preloaded library; hostid: bionic has no gethostid. The single
+# binary compiles every program, installed or not, so hostid's call is
+# stubbed rather than left out.
+recipe_patch() {
+  sed -i 's|id = gethostid ();|id = 0;|' src/hostid.c
+  grep -q 'id = 0;' src/hostid.c
+}
 recipe_build() {
   ./configure ${SQ_HOST_TRIPLE:+--host=$SQ_HOST_TRIPLE --build=$(sh ./build-aux/config.guess 2>/dev/null || sh ./support/config.guess)} \
     --prefix="$SQ_PREFIX" --disable-nls --disable-xattr --disable-acl --without-selinux \
     --without-openssl --without-gmp --enable-single-binary=symlinks \
-    --enable-no-install-program=pinky,users,who,uptime,stdbuf \
+    --enable-no-install-program=pinky,users,who,uptime,stdbuf,hostid \
     gl_cv_host_operating_system=Android
   make -j"$JOBS"
   make install DESTDIR="$dest"
