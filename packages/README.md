@@ -105,7 +105,7 @@ host test can be made to refuse them the same way, with a preloaded
 
 ## Large packages (bundled=no)
 
-A recipe with `bundled=no` (llvm: clang and lld, LLVM 21.1.8) is built and
+A recipe with `bundled=no` (llvm: clang and lld, LLVM 23.1.5) is built and
 published like the others but not carried in the APK: its archive goes to
 `build/packages/extra/`, the index leaves it out, and
 `tools/fetch_packages.sh` skips it. Get it on purpose and install it with
@@ -113,7 +113,7 @@ pkg, so it is never stored twice:
 
 ```sh
 tools/fetch_packages.sh --get llvm          # Termux: into ~/storage/downloads
-pkg install /sdcard/Download/llvm-21.1.8-<key>.tar.zst --consume   # in sqterm
+pkg install /sdcard/Download/llvm-23.1.5-<key>.tar.zst --consume   # in sqterm
 ```
 
 llvm is built on CI only (hours on a phone): CMake and Ninja, the NDK's CMake

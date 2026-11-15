@@ -1,4 +1,4 @@
-# llvm: clang and lld for sqterm's prefix (step 3, first spike), LLVM 21.
+# llvm: clang and lld for sqterm's prefix (step 3, first spike), LLVM 23.
 #
 # One binary, bin/llvm (LLVM's driver build), with clang, clang++, ld.lld and
 # the rest as symbolic links to it: one copy of LLVM's code, not one per
@@ -16,7 +16,7 @@
 # while LLVM builds. LLVM publishes no sha256 (a signature only): the first
 # download is recorded in packages/sources.lock.
 
-version=21.1.8
+version=23.1.5
 license="Apache-2.0 WITH LLVM-exception"
 file=llvm-project-$version.src.tar.xz
 url=https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/$file
