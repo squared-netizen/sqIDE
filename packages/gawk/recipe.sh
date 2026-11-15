@@ -9,10 +9,11 @@ sha256=
 top=gawk-$version
 depends=""
 keep="bin/gawk bin/awk share/licenses/gawk"
-# No loadable extensions (no dlopen of .so files from the prefix).
+# No loadable extensions (no dlopen of .so files from the prefix). No
+# spawn.h: awk.h defines a macro `stack`, which breaks linux/sched.h under it.
 recipe_build() {
   ./configure ${SQ_HOST_TRIPLE:+--host=$SQ_HOST_TRIPLE --build=$(sh ./build-aux/config.guess 2>/dev/null || sh ./support/config.guess)} \
-    --prefix="$SQ_PREFIX" --disable-nls --disable-extensions --without-readline --without-mpfr
+    --prefix="$SQ_PREFIX" --disable-nls --disable-extensions --without-readline --without-mpfr ac_cv_header_spawn_h=no
   make -j"$JOBS"
   make install DESTDIR="$dest"
 }
