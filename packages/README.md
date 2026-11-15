@@ -22,6 +22,10 @@ sources.lock      sha256s of the sources that publish none, from their first dow
 ncurses/recipe.sh ncurses 6.6: the terminal database (sqterm's entry in it), tic, tput
 zsh/recipe.sh     zsh 5.9.2: the shell, static, its modules linked in
 zsh/zshrc         $PREFIX/etc/zshrc: keys, history, completion, a prompt
+bash/ coreutils/ sed/ grep/ findutils/ gawk/ make/
+                  GNU (GPLv3): bash 5.3, coreutils 9.8 (one binary, symbolic
+                  links), sed 4.9, grep 3.12, find and xargs 4.10.0, gawk 5.3.2
+                  (awk), make 4.4.1 (recipes run under /system/bin/sh)
 ```
 
 ## Getting them
