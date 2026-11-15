@@ -2,6 +2,7 @@
 # no sha256: the first download is recorded in packages/sources.lock.
 
 version=5.3.2
+license=GPL-3.0-or-later
 file=gawk-$version.tar.xz
 url=https://ftp.gnu.org/gnu/gawk/$file
 mirrors="https://ftpmirror.gnu.org/gnu/gawk/$file"

@@ -2,6 +2,7 @@
 # no sha256: the first download is recorded in packages/sources.lock.
 
 version=5.3
+license=GPL-3.0-or-later
 file=bash-$version.tar.gz
 url=https://ftp.gnu.org/gnu/bash/$file
 mirrors="https://ftpmirror.gnu.org/gnu/bash/$file"

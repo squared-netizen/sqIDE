@@ -2,6 +2,7 @@
 # no sha256: the first download is recorded in packages/sources.lock.
 
 version=9.8
+license=GPL-3.0-or-later
 file=coreutils-$version.tar.xz
 url=https://ftp.gnu.org/gnu/coreutils/$file
 mirrors="https://ftpmirror.gnu.org/gnu/coreutils/$file"

@@ -70,7 +70,8 @@ struct Places {
 void stage_packages(sq::files::FileSystem& files, Places& places);
 /// On the model's thread: one staged archive (a tar.zst) unpacked into
 /// `prefix`. Empty when it was; else what went wrong.
-[[nodiscard]] std::string unpack_package(std::string_view archive, std::string_view prefix);
+[[nodiscard]] std::string unpack_package(std::string_view archive, std::string_view prefix,
+                                         std::string_view name);
 /// The index recorded as installed: the next start copies nothing.
 bool record_installed(const Places& places);
 

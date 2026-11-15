@@ -2,6 +2,7 @@
 # no sha256: the first download is recorded in packages/sources.lock.
 
 version=3.12
+license=GPL-3.0-or-later
 file=grep-$version.tar.xz
 url=https://ftp.gnu.org/gnu/grep/$file
 mirrors="https://ftpmirror.gnu.org/gnu/grep/$file"
