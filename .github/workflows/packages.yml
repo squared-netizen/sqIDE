@@ -54,7 +54,7 @@ jobs:
           bash packages/build.sh --keys | tee keys.txt
           gh release view "$RELEASE" --json assets --jq '.assets[].name' > have.txt 2>/dev/null || : > have.txt
           missing=
-          while read -r name version key; do
+          while read -r name version key bundled; do
             grep -qx "$name-$version-$key.tar.zst" have.txt || missing="$missing $name"
           done < keys.txt
           echo "missing=${missing# }" >> "$GITHUB_OUTPUT"
@@ -69,9 +69,23 @@ jobs:
           echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
           echo "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
 
+      - name: Room on the disk (LLVM's build needs several GB)
+        if: contains(steps.plan.outputs.missing, 'llvm')
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          df -h /
+
       - name: Tools
         if: steps.plan.outputs.missing != ''
-        run: sudo apt-get install -y --no-install-recommends zstd xz-utils
+        run: sudo apt-get install -y --no-install-recommends zstd xz-utils cmake ninja-build ccache
+
+      - name: Compiler cache (kept even when a run fails)
+        if: steps.plan.outputs.missing != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ github.run_id }}
+          restore-keys: ccache-
 
       - name: Sources, kept between runs
         if: steps.plan.outputs.missing != ''
@@ -88,6 +102,7 @@ jobs:
           path: |
             build/packages/*/key
             build/packages/*/dest
+            build/packages/extra
             sq_android/assets/packages
           key: package-builds-${{ hashFiles('packages/**', 'terminfo/sqterm.ti') }}
           restore-keys: package-builds-
@@ -104,23 +119,31 @@ jobs:
         run: |
           cp packages/sources.lock "$RUNNER_TEMP/sources.lock.before"
           bash tools/fetch_packages.sh --sources
-
-      - name: Build (offline; up-to-date packages are skipped)
-        if: steps.plan.outputs.missing != ''
-        env:
-          CC_FOR_BUILD: gcc
-        run: |
-          clang --version | head -n 1
-          bash packages/build.sh
-
-      - name: New sources.lock lines, to commit to the branch
-        if: always() && github.ref != 'refs/heads/main' && steps.plan.outputs.missing != ''
-        run: |
+          # New lines: reported now, before hours of building with them.
           if ! cmp -s "$RUNNER_TEMP/sources.lock.before" packages/sources.lock; then
             echo "packages/sources.lock gained lines; commit them to this branch:"
             diff "$RUNNER_TEMP/sources.lock.before" packages/sources.lock | sed -n 's/^> //p'
             exit 1
           fi
+
+      - name: Build (offline; up-to-date packages are skipped)
+        if: steps.plan.outputs.missing != ''
+        env:
+          CC_FOR_BUILD: gcc
+          CXX_FOR_BUILD: g++
+          CCACHE_DIR: /home/runner/.cache/ccache
+          CCACHE_MAXSIZE: 3G
+          CCACHE_BASEDIR: ${{ github.workspace }}
+        run: |
+          clang --version | head -n 1
+          bash packages/build.sh
+
+      - name: Save the compiler cache
+        if: always() && steps.plan.outputs.missing != ''
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ github.run_id }}
 
       - name: The build logs, when it failed
         if: failure()
@@ -134,10 +157,12 @@ jobs:
         if: steps.plan.outputs.missing != ''
         run: |
           mkdir dist
-          while read -r name version key; do
+          while read -r name version key bundled; do
             asset=$name-$version-$key.tar.zst
             grep -qx "$asset" have.txt && continue
-            cp "sq_android/assets/packages/$name-$version.tar.zst" "dist/$asset"
+            from=sq_android/assets/packages
+            [ "$bundled" = no ] && from=build/packages/extra
+            cp "$from/$name-$version.tar.zst" "dist/$asset"
             ( cd dist && sha256sum "$asset" > "$asset.sha256" && cat "$asset.sha256" )
           done < keys.txt
 

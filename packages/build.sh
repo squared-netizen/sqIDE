@@ -18,7 +18,8 @@
 #                                       build/packages/host/: to check a recipe
 #                                       where there is no NDK (nothing packed
 #                                       into the app)
-#   bash packages/build.sh --keys       each package's name, version and key
+#   bash packages/build.sh --keys       each package's name, version, key and
+#                                       whether the APK carries it (yes, no)
 #                                       (tools/fetch_packages.sh, CI)
 #   bash packages/build.sh --index      write the index for the archives
 #                                       already in sq_android/assets/packages/
@@ -46,7 +47,7 @@ RECIPES=$ROOT/packages
 WORK=$ROOT/build/packages
 SOURCES=$WORK/sources
 LOCK=$RECIPES/sources.lock
-ORDER="pkg ncurses zsh bash coreutils sed grep gawk make"
+ORDER="pkg ncurses zsh bash coreutils sed grep gawk make llvm"
 
 # Where the app's prefix is: what every program is built to find its files
 # under. The app's getFilesDir() is /data/user/0/dev.squared.sqterm/files,
@@ -58,6 +59,8 @@ SQ_PREFIX=/data/data/dev.squared.sqterm/files/usr
 # files.
 SQ_API=28
 OUT=$ROOT/sq_android/assets/packages
+# Large packages (bundled=no), not in the APK: pkg installs them from a file.
+EXTRA=$ROOT/build/packages/extra
 MODE=build
 HOST_TEST=0
 
@@ -129,7 +132,8 @@ write_index() {
 case $MODE in
   keys)
     for name in $ORDER; do
-      printf '%s %s %s\n' "$name" "$(. "$RECIPES/$name/recipe.sh"; echo "$version")" "$(package_key "$name")"
+      printf '%s %s %s %s\n' "$name" "$(. "$RECIPES/$name/recipe.sh"; echo "$version")" \
+        "$(package_key "$name")" "$(. "$RECIPES/$name/recipe.sh"; echo "${bundled:-yes}")"
     done
     exit 0 ;;
   index) mkdir -p "$OUT"; write_index; exit 0 ;;
@@ -146,12 +150,14 @@ if [ "$HOST_TEST" = 1 ]; then
   # Where it will be unpacked, if not here (sqterm's host harness: its files).
   SQ_PREFIX=${SQ_HOST_PREFIX:-$WORK/host/usr}
   OUT=$WORK/host/out
+  EXTRA=$WORK/host/extra
   WORK=$WORK/host/work
   export CC=${CC:-cc} AR=${AR:-ar} RANLIB=${RANLIB:-ranlib} STRIP=${STRIP:-strip}
   export CFLAGS="-O2" LDFLAGS=""
   SQ_HOST_TRIPLE=
   SQ_CROSS=0
   SQ_SYSROOT=
+  SQ_NDK=
   say "host test: built for this machine, prefix $SQ_PREFIX"
 else
   NDK=${ANDROID_NDK_HOME:-}
@@ -162,6 +168,7 @@ else
   [ -n "$NDK" ] && [ -d "$NDK" ] || fail "no NDK: set ANDROID_NDK_HOME (the app's build finds it the same way)"
   SYSROOT=$(ls -d "$NDK"/toolchains/llvm/prebuilt/*/sysroot 2>/dev/null | head -n 1)
   SQ_SYSROOT=$SYSROOT
+  SQ_NDK=$NDK
   [ -d "$SYSROOT/usr/lib/aarch64-linux-android/$SQ_API" ] || fail "the NDK at $NDK has no libraries for API $SQ_API"
   SQ_HOST_TRIPLE=aarch64-linux-android
   pick() { for tool in "$@"; do command -v "$tool" >/dev/null 2>&1 && { echo "$tool"; return; }; done; echo "$1"; }
@@ -236,13 +243,17 @@ build_one() {
   local recipe_dir=$RECIPES/$name
   # The recipe's variables and functions, fresh for each package.
   unset -f recipe_patch recipe_build recipe_after 2>/dev/null || true
-  version= url= mirrors= sha256= file= top= depends= keep= inputs= license=
+  version= url= mirrors= sha256= file= top= depends= keep= inputs= license= bundled=
   . "$recipe_dir/recipe.sh"
   local here=$WORK/$name key
   key=$(package_key "$name")
   # Up to date: built from this key, its archive and its install still here
   # (a package that depends on it builds against the install).
-  if [ "$(cat "$here/key" 2>/dev/null)" = "$key" ] && [ -f "$OUT/$name-$version.tar.zst" ] &&
+  # Where its archive goes: the APK's assets, or (bundled=no: a large
+  # package, installed with pkg from a file) build/packages/extra/.
+  local into=$OUT
+  [ "${bundled:-yes}" = no ] && into=$EXTRA
+  if [ "$(cat "$here/key" 2>/dev/null)" = "$key" ] && [ -f "$into/$name-$version.tar.zst" ] &&
      [ -d "$here/dest" ]; then
     say "$name $version: up to date ($key)"
     return
@@ -263,7 +274,7 @@ build_one() {
   fi
   local saved_cppflags=$CPPFLAGS saved_ldflags=$LDFLAGS
   for dependency in $depends; do use_dependency "$dependency"; done
-  export CPPFLAGS LDFLAGS SQ_PREFIX SQ_HOST_TRIPLE SQ_CROSS SQ_API SQ_SYSROOT JOBS ROOT src dest version
+  export CPPFLAGS LDFLAGS SQ_PREFIX SQ_HOST_TRIPLE SQ_CROSS SQ_API SQ_SYSROOT SQ_NDK JOBS ROOT src dest version
   # In a bash of its own, so a failing step stops it (set -e does not reach
   # into a command on the left of ||).
   bash -c 'set -euo pipefail; . "$1"; cd "$src"
@@ -285,7 +296,8 @@ build_one() {
       if head -c 4 "$program" | grep -q 'ELF'; then $STRIP "$program" 2>/dev/null || true; fi
     done
     write_manifest )
-  local archive=$OUT/$name-$version.tar.zst
+  mkdir -p "$into"
+  local archive=$into/$name-$version.tar.zst
   # ustar (names in its 255 bytes, as the app's reader takes), sorted, owned
   # by nobody in particular, dated at the epoch: the same bytes each build.
   # A 1 MB window (wlog 20): what the app's decoder must hold while it
@@ -295,7 +307,7 @@ build_one() {
     zstd -q -19 --zstd=wlog=20 -T0 -o "$archive.new" -f
   mv "$archive.new" "$archive"
   # Older versions of it go.
-  for old in "$OUT/$name"-*.tar.zst; do [ "$old" = "$archive" ] || rm -f "$old"; done
+  for old in "$into/$name"-*.tar.zst; do [ "$old" = "$archive" ] || rm -f "$old"; done
   say "$name: $(du -k "$archive" | cut -f 1) KB packed, $(du -sk "$installed" | cut -f 1) KB installed"
   echo "$key" > "$here/key"
 }
