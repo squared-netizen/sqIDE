@@ -44,7 +44,7 @@ RECIPES=$ROOT/packages
 WORK=$ROOT/build/packages
 SOURCES=$WORK/sources
 LOCK=$RECIPES/sources.lock
-ORDER="ncurses zsh"
+ORDER="ncurses zsh bash coreutils sed grep findutils gawk make"
 
 # Where the app's prefix is: what every program is built to find its files
 # under. The app's getFilesDir() is /data/user/0/dev.squared.sqterm/files,
@@ -204,6 +204,9 @@ build_one() {
   # Only what the package keeps; executables and libraries stripped.
   ( cd "$installed"
     for path in $keep; do [ -e "$path" ] || [ -L "$path" ] || fail "$name: keeps $path, which was not installed"; done
+    # Android refuses hard links in an app's files: a package carries none.
+    linked=$(find $keep -type f -links +1 -print -quit 2>/dev/null || true)
+    [ -z "$linked" ] || fail "$name: $linked is hard-linked; make it a copy or a symbolic link in recipe_after"
     find $keep -type f -perm -u+x 2>/dev/null | while read -r program; do
       if head -c 4 "$program" | grep -q 'ELF'; then $STRIP "$program" 2>/dev/null || true; fi
     done )
