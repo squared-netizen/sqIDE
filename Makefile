@@ -25,7 +25,9 @@
 #   make squared-core    build the vendored framework
 #   make android-help    every target and override
 #   make packages        build the prefix's packages (zsh, ncurses) into the
-#                        APK's assets: packages/build.sh (12.5)
+#                        APK's assets, offline: packages/build.sh (12.5). The
+#                        download is its own step, tools/fetch_packages.sh:
+#                        CI's packages, or --sources to build them here
 #   make clean
 #   make V=1             every command in full (a build prints one short line
 #                        per step: mk/squared_generated.mk)
@@ -230,7 +232,10 @@ $(BUILD)/sq_app/third_party/%.o: sq_app/third_party/%.c $(SQ_FLAGS_STAMP)
 	$(CC) $(SQ_CPPFLAGS) $(OPT) -fPIC -fvisibility=hidden -MMD -MP -c $< -o $@
 
 # The prefix's packages (12.5), into sq_android/assets/packages/: run when
-# asked, not by every build (a first one takes several minutes).
+# asked, not by every build (a first one takes several minutes). Offline, as
+# every build is: the sources come from tools/fetch_packages.sh --sources, a
+# deliberate step; or tools/fetch_packages.sh puts CI's packages there and
+# this is not needed.
 .PHONY: packages
 packages:
 	bash packages/build.sh

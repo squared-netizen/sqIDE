@@ -30,6 +30,25 @@ recipe_patch() {
 }
 
 recipe_build() {
+  # A cross build (CI's x86 Linux): the tic built for Android cannot run
+  # there, and recipe_after needs one. A copy of the source (patched: tic's
+  # temporary file under the prefix, which compiling terminfo never makes)
+  # builds one for this machine first, with the same options that decide the
+  # compiled entries' format (wide, extended colours). On the phone the tic
+  # built below runs, as before.
+  if [ "${SQ_CROSS:-0}" = 1 ]; then
+    rm -rf "$src.build"
+    cp -a "$src" "$src.build"
+    ( cd "$src.build"
+      CC="$CC_FOR_BUILD" CFLAGS=-O2 CPPFLAGS= LDFLAGS= AR=ar RANLIB=ranlib ./configure \
+        --without-shared --with-normal --without-debug \
+        --without-ada --without-cxx --without-cxx-binding --without-tests --without-manpages \
+        --enable-widec --enable-overwrite --enable-const \
+        --enable-ext-colors --enable-ext-mouse --disable-stripping \
+        --enable-symlinks --disable-db-install --enable-big-core
+      make -j"$JOBS" )
+    [ -x "$src.build/progs/tic" ] || { echo "no tic for the build machine" >&2; return 1; }
+  fi
   # Android refuses hard links in an app's files (the phone, 2026-11-04: tic's
   # "cannot link l/lpr to p/printer"): tic makes an entry's other names as
   # symbolic links. The database is not installed whole (--disable-db-install,
@@ -39,9 +58,13 @@ recipe_build() {
   # build for a cross one (the phone, 2026-11-04), and then builds a tic that
   # refuses -e ("can't be used without -I or -C"), which recipe_after uses.
   # A phone has the memory.
-  # nl_langinfo is API 26 and locale.h's functions are not all there at 22:
-  # ncurses takes its charset from the environment instead.
+  # nl_langinfo is API 26 and locale.h's functions were not all there at 22:
+  # ncurses takes its charset from the environment instead (kept at 28: the
+  # same behaviour on every build).
+  # --with-build-cc: what builds the helpers ncurses runs while it builds
+  # (make_hash, make_keys) in a cross build.
   ./configure ${SQ_HOST_TRIPLE:+--host=$SQ_HOST_TRIPLE --build=$(sh ./config.guess)} \
+    ${SQ_HOST_TRIPLE:+--with-build-cc="$CC_FOR_BUILD"} \
     --prefix="$SQ_PREFIX" \
     --without-shared --with-normal --without-debug \
     --without-ada --without-cxx --without-cxx-binding --without-tests --without-manpages \
@@ -60,12 +83,15 @@ recipe_after() {
   # The terminfo database: the entries a shell, a remote machine or a
   # program may ask for (the whole is 8 MB), and sqterm's own, compiled by
   # the tic built here (it runs where it was built: on the phone, and in a
-  # host test). An entry's other names become symbolic links.
+  # host test), or in a cross build the one built for this machine. An
+  # entry's other names become symbolic links.
   local entries=ansi,dumb,linux,screen,screen-256color,tmux,tmux-256color
   entries=$entries,vt100,vt102,vt220,xterm,xterm-256color,xterm-color,xterm-direct
+  local tic=./bin/tic
+  if [ "${SQ_CROSS:-0}" = 1 ]; then tic=$src.build/progs/tic; fi
   mkdir -p share/terminfo
-  ./bin/tic -x -e "$entries" -o share/terminfo "$src/misc/terminfo.src"
-  ./bin/tic -x -o share/terminfo "$ROOT/terminfo/sqterm.ti"
+  "$tic" -x -e "$entries" -o share/terminfo "$src/misc/terminfo.src"
+  "$tic" -x -o share/terminfo "$ROOT/terminfo/sqterm.ti"
   local entry
   for entry in a/ansi d/dumb x/xterm-256color s/sqterm; do
     [ -f "share/terminfo/$entry" ] || { echo "tic did not write $entry" >&2; return 1; }
