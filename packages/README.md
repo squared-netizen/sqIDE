@@ -22,6 +22,9 @@ sources.lock      sha256s of the sources that publish none, from their first dow
 ncurses/recipe.sh ncurses 6.6: the terminal database (sqterm's entry in it), tic, tput
 zsh/recipe.sh     zsh 5.9.2: the shell, static, its modules linked in
 zsh/zshrc         $PREFIX/etc/zshrc: keys, history, completion, a prompt
+pkg/recipe.sh     pkg (sq_app/pkg/pkg.cpp): list, files, install a package from
+                  a file (--consume), remove, backup; sqterm's own, built from
+                  this repository (no download)
 bash/ coreutils/ sed/ grep/ gawk/ make/
                   GNU (GPLv3): bash 5.3, coreutils 9.8 (one binary, symbolic
                   links), sed 4.9, grep 3.12, gawk 5.3.2
@@ -100,6 +103,33 @@ ncurses is configured `--enable-symlinks`, zsh installs with `LN=cp`. A
 host test can be made to refuse them the same way, with a preloaded
 `link`/`linkat` that fail.
 
+## The manifest, and pkg
+
+Every package carries `SQ-INF/manifest.json`, written by `build.sh`: the
+squared-cartridge envelope (sqcart's spec, kind `package`: `id`, `version`,
+`license`), and under `consumers.sqterm` the package's `key`, `api`,
+`built_with` and `files` (every file and link it installs, not
+directories). The app's first start and `pkg install` unpack it to
+`$PREFIX/var/lib/sqterm/pkg/<name>/manifest.json`, so packages never write
+over each other's.
+
+`pkg` reads those records:
+
+```sh
+pkg list                          # installed: name, version
+pkg files zsh                     # what zsh installed
+pkg install /sdcard/Download/zsh-5.9.2-<key>.tar.zst --consume
+pkg remove make
+pkg backup zsh /sdcard/Download     # zsh-5.9.2.tar: its files as a package again
+```
+
+An upgrade (`pkg install` of a newer version) deletes the files the old
+version had and the new one has not, and the folders left empty. `--consume`
+deletes the file once it is installed, so a large package is not kept twice.
+`backup` writes a plain tar (`pkg install` takes it as it takes a
+.tar.zst). Reading shared storage needs the Files permission, granted once:
+Settings, Apps, sqterm, Permissions, Files.
+
 ## What a recipe is
 
 `packages/<name>/recipe.sh`, sourced by `build.sh`:
@@ -111,6 +141,8 @@ host test can be made to refuse them the same way, with a preloaded
 | `top` | the folder the source unpacks into |
 | `depends` | recipes built first, whose headers and libraries it uses |
 | `keep` | what the package carries, relative to the prefix |
+| `license` | the package's licence, for its manifest |
+| `inputs` | files outside the recipe folder that decide what is built (in its key) |
 | `recipe_patch` | in the source: changes for Android (paths) |
 | `recipe_build` | configure, make, `make install DESTDIR="$dest"` |
 | `recipe_after` | in what was installed: the last touches (links, files of ours) |

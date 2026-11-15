@@ -68,7 +68,10 @@ void Shell::install(sq::messaging::Telegraph& t) {
                               package.name.c_str());
         say({line.data(), static_cast<std::size_t>(n > 0 ? n : 0)});
         publish(t);  // shown as it goes: the first start takes a few seconds
-        const std::string error = unpack_package(package.archive, places_.prefix);
+        // package.name is "name version".
+        const std::string error = unpack_package(
+            package.archive, places_.prefix,
+            std::string_view(package.name).substr(0, package.name.find(' ')));
         if (!error.empty()) {
             n = std::snprintf(line.data(), line.size(), "[sqterm: %.100s]\r\n", error.c_str());
             say({line.data(), static_cast<std::size_t>(n > 0 ? n : 0)});

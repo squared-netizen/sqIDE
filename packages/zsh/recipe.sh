@@ -13,6 +13,7 @@
 # interactive shell (packages/zsh/zshrc), read before the user's ~/.zshrc.
 
 version=5.9.2
+license="MIT-like (zsh LICENCE)"
 file=zsh-$version.tar.xz
 url=https://www.zsh.org/pub/$file
 mirrors="https://downloads.sourceforge.net/project/zsh/zsh/$version/$file"

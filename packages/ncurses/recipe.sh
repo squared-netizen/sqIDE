@@ -12,6 +12,7 @@
 # is recorded in packages/sources.lock.
 
 version=6.6
+license=X11
 file=ncurses-$version.tar.gz
 url=https://ftp.gnu.org/gnu/ncurses/$file
 mirrors="https://invisible-mirror.net/archives/ncurses/$file"

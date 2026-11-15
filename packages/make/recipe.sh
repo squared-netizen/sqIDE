@@ -2,6 +2,7 @@
 # no sha256: the first download is recorded in packages/sources.lock.
 
 version=4.4.1
+license=GPL-3.0-or-later
 file=make-$version.tar.gz
 url=https://ftp.gnu.org/gnu/make/$file
 mirrors="https://ftpmirror.gnu.org/gnu/make/$file"

@@ -106,6 +106,7 @@ fetch_source() {
   local name=$1 version= url= mirrors= sha256= file= from got=0 actual expected
   # The recipe's source fields only; its functions are not run.
   . "$RECIPES/$name/recipe.sh"
+  if [ -z "$file" ]; then say local "$name (built from this repository)"; return; fi
   local path=$SOURCES/$file
   expected=$sha256
   if [ -z "$expected" ] && [ -f "$LOCK" ]; then

@@ -46,7 +46,7 @@ RECIPES=$ROOT/packages
 WORK=$ROOT/build/packages
 SOURCES=$WORK/sources
 LOCK=$RECIPES/sources.lock
-ORDER="ncurses zsh bash coreutils sed grep gawk make"
+ORDER="pkg ncurses zsh bash coreutils sed grep gawk make"
 
 # Where the app's prefix is: what every program is built to find its files
 # under. The app's getFilesDir() is /data/user/0/dev.squared.sqterm/files,
@@ -151,6 +151,7 @@ if [ "$HOST_TEST" = 1 ]; then
   export CFLAGS="-O2" LDFLAGS=""
   SQ_HOST_TRIPLE=
   SQ_CROSS=0
+  SQ_SYSROOT=
   say "host test: built for this machine, prefix $SQ_PREFIX"
 else
   NDK=${ANDROID_NDK_HOME:-}
@@ -160,6 +161,7 @@ else
   fi
   [ -n "$NDK" ] && [ -d "$NDK" ] || fail "no NDK: set ANDROID_NDK_HOME (the app's build finds it the same way)"
   SYSROOT=$(ls -d "$NDK"/toolchains/llvm/prebuilt/*/sysroot 2>/dev/null | head -n 1)
+  SQ_SYSROOT=$SYSROOT
   [ -d "$SYSROOT/usr/lib/aarch64-linux-android/$SQ_API" ] || fail "the NDK at $NDK has no libraries for API $SQ_API"
   SQ_HOST_TRIPLE=aarch64-linux-android
   pick() { for tool in "$@"; do command -v "$tool" >/dev/null 2>&1 && { echo "$tool"; return; }; done; echo "$1"; }
@@ -210,12 +212,31 @@ use_dependency() {
   LDFLAGS="$LDFLAGS -L$dir/lib"
 }
 
+# SQ-INF/manifest.json, in the install (the current directory): the
+# squared-cartridge envelope (sqcart's spec, kind "package"), and for sqterm
+# the package's key, API level, what it was built with and every file it
+# installs (not directories), which pkg reads to list, remove, upgrade and
+# back up. The app unpacks it to usr/var/lib/sqterm/pkg/<name>/.
+write_manifest() {
+  local with= dependency
+  for dependency in $depends; do with="$with${with:+, }\"$dependency\""; done
+  mkdir -p SQ-INF
+  {
+    printf '{\n  "format": "squared-cartridge",\n  "format_version": 2,\n  "kind": "package",\n'
+    printf '  "id": "%s",\n  "version": "%s",\n  "license": "%s",\n' "$name" "$version" "$license"
+    printf '  "consumers": {\n    "sqterm": {\n      "key": "%s",\n      "api": %s,\n' "$key" "$SQ_API"
+    printf '      "built_with": [%s],\n      "files": [\n' "$with"
+    find $keep ! -type d | LC_ALL=C sort | sed 's/\\/\\\\/g; s/"/\\"/g; s/.*/        "&"/; $!s/$/,/'
+    printf '      ]\n    }\n  }\n}\n'
+  } > SQ-INF/manifest.json
+}
+
 build_one() {
   name=$1
   local recipe_dir=$RECIPES/$name
   # The recipe's variables and functions, fresh for each package.
   unset -f recipe_patch recipe_build recipe_after 2>/dev/null || true
-  version= url= mirrors= sha256= file= top= depends= keep= inputs=
+  version= url= mirrors= sha256= file= top= depends= keep= inputs= license=
   . "$recipe_dir/recipe.sh"
   local here=$WORK/$name key
   key=$(package_key "$name")
@@ -227,16 +248,22 @@ build_one() {
     return
   fi
   say "$name $version ($key)"
-  check_source
   rm -rf "$here"
   mkdir -p "$here"
-  tar -xf "$SOURCES/$file" -C "$here"
-  src=$here/$top
   dest=$here/dest
-  [ -d "$src" ] || fail "$name: $file has no $top/"
+  if [ -n "$file" ]; then
+    check_source
+    tar -xf "$SOURCES/$file" -C "$here"
+    src=$here/$top
+    [ -d "$src" ] || fail "$name: $file has no $top/"
+  else
+    # sqterm's own (pkg): built from this repository, named in `inputs`.
+    src=$here/src
+    mkdir -p "$src"
+  fi
   local saved_cppflags=$CPPFLAGS saved_ldflags=$LDFLAGS
   for dependency in $depends; do use_dependency "$dependency"; done
-  export CPPFLAGS LDFLAGS SQ_PREFIX SQ_HOST_TRIPLE SQ_CROSS SQ_API JOBS ROOT src dest version
+  export CPPFLAGS LDFLAGS SQ_PREFIX SQ_HOST_TRIPLE SQ_CROSS SQ_API SQ_SYSROOT JOBS ROOT src dest version
   # In a bash of its own, so a failing step stops it (set -e does not reach
   # into a command on the left of ||).
   bash -c 'set -euo pipefail; . "$1"; cd "$src"
@@ -256,14 +283,15 @@ build_one() {
     [ -z "$linked" ] || fail "$name: $linked is hard-linked; make it a copy or a symbolic link in recipe_after"
     find $keep -type f -perm -u+x 2>/dev/null | while read -r program; do
       if head -c 4 "$program" | grep -q 'ELF'; then $STRIP "$program" 2>/dev/null || true; fi
-    done )
+    done
+    write_manifest )
   local archive=$OUT/$name-$version.tar.zst
   # ustar (names in its 255 bytes, as the app's reader takes), sorted, owned
   # by nobody in particular, dated at the epoch: the same bytes each build.
   # A 1 MB window (wlog 20): what the app's decoder must hold while it
   # unpacks (it refuses more than 2 MB), for a few percent of size.
   ( cd "$installed" &&
-    tar --format=ustar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -cf - $keep ) |
+    tar --format=ustar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -cf - SQ-INF $keep ) |
     zstd -q -19 --zstd=wlog=20 -T0 -o "$archive.new" -f
   mv "$archive.new" "$archive"
   # Older versions of it go.
