@@ -24,10 +24,10 @@
 #   make status          what the build found on this host
 #   make squared-core    build the vendored framework
 #   make android-help    every target and override
-#   make packages        the prefix's packages (zsh, ncurses) into the APK's
-#                        assets: downloaded from the release CI built for
-#                        these recipes (packages/build.sh, 12.5)
-#   make packages-build  build them here instead (several minutes)
+#   make packages        build the prefix's packages (zsh, ncurses) into the
+#                        APK's assets, offline: packages/build.sh (12.5). The
+#                        download is its own step, tools/fetch_packages.sh:
+#                        CI's packages, or --sources to build them here
 #   make clean
 #   make V=1             every command in full (a build prints one short line
 #                        per step: mk/squared_generated.mk)
@@ -232,15 +232,13 @@ $(BUILD)/sq_app/third_party/%.o: sq_app/third_party/%.c $(SQ_FLAGS_STAMP)
 	$(CC) $(SQ_CPPFLAGS) $(OPT) -fPIC -fvisibility=hidden -MMD -MP -c $< -o $@
 
 # The prefix's packages (12.5), into sq_android/assets/packages/: run when
-# asked, not by every build. `packages` downloads the release CI built for the
-# recipes as they are here (.github/workflows/packages.yml); `packages-build`
-# builds them on this phone (a first one takes several minutes).
-.PHONY: packages packages-build
+# asked, not by every build (a first one takes several minutes). Offline, as
+# every build is: the sources come from tools/fetch_packages.sh --sources, a
+# deliberate step; or tools/fetch_packages.sh puts CI's packages there and
+# this is not needed.
+.PHONY: packages
 packages:
 	bash packages/build.sh
-
-packages-build:
-	bash packages/build.sh --build
 
 # The native-app-glue is compiled from the NDK rather than vendored into the
 # project: it is part of the platform, it is versioned with the NDK, and a

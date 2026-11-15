@@ -1,45 +1,39 @@
 #!/usr/bin/env bash
-# packages/build.sh: sqterm's packages for its prefix (Sprint 12.5).
+# packages/build.sh: build sqterm's packages for its prefix (Sprint 12.5).
+# Offline: it makes no network request. tools/fetch_packages.sh is the one
+# step that downloads, and is run on purpose.
 #
 # Each package is a recipe (packages/<name>/recipe.sh): its source's URL and
-# sha256, how to build it, and what of its install goes in the package. They
-# are built with the NDK for API 28 (Android 9) and packed as
-# <name>-<version>.tar.zst in sq_android/assets/packages/, with an index the
-# app reads. The app unpacks them into its prefix the first time it starts
-# (and again when the index changes).
+# sha256, how to build it, and what of its install goes in the package. This
+# script checks each source (already in build/packages/sources/) against the
+# recipe's sha256 or packages/sources.lock, builds it with the NDK for API 28
+# (Android 9), and packs what the recipe keeps as <name>-<version>.tar.zst in
+# sq_android/assets/packages/, with an index the app reads. The app unpacks
+# them into its prefix the first time it starts (and again when the index
+# changes).
 #
-# GitHub Actions builds them (.github/workflows/packages.yml, decided
-# 2026-11-04) and publishes a release named after the recipes: packages-<key>,
-# the key a sha256 of everything here that decides what is built (this script,
-# the recipes and their files, sources.lock, terminfo/sqterm.ti, the API
-# level). By default this script downloads the release for the recipes as
-# they are in this folder, and checks each file against the release's
-# SHA256SUMS. A recipe changed here and not yet built by CI has no release:
-# build it here.
+#   bash packages/build.sh              every package, in order (make packages)
+#   bash packages/build.sh zsh          one (what it depends on must be built)
+#   bash packages/build.sh --host-test  for this machine instead, into
+#                                       build/packages/host/: to check a recipe
+#                                       where there is no NDK (nothing packed
+#                                       into the app)
+#   bash packages/build.sh --tag        the name of CI's release for these
+#                                       recipes (tools/fetch_packages.sh)
+#   bash packages/build.sh --list       the packages and their versions
 #
-#   bash packages/build.sh                    download the release (make packages)
-#   bash packages/build.sh --build [name...]  build here instead, every package
-#                                             or the ones named (what they
-#                                             depend on must be built)
-#                                             (make packages-build)
-#   bash packages/build.sh --host-test        build for this machine instead,
-#                                             into build/packages/host/: to check
-#                                             a recipe where there is no NDK
-#                                             (nothing packed into the app)
-#   bash packages/build.sh --tag              the release these recipes need
-#   bash packages/build.sh --list             the packages and their versions
+# Two ways to fill sq_android/assets/packages/, both starting with a
+# deliberate download:
+#   tools/fetch_packages.sh             the packages CI built (GitHub Actions,
+#                                       .github/workflows/packages.yml), or
+#   tools/fetch_packages.sh --sources   the sources, then: make packages
 #
-# A build runs on the phone (Termux: clang, make, curl, tar, xz, zstd) with the
-# NDK the APK builds use ($ANDROID_NDK_HOME, or the newest under
+# A build runs on the phone (Termux: clang, make, tar, xz, zstd) with the NDK
+# the APK builds use ($ANDROID_NDK_HOME, or the newest under
 # $PREFIX/opt/android-sdk/ndk), and on CI's x86 Linux with the NDK's clang.
 # Off the phone it is a cross build (SQ_CROSS=1): nothing it builds can run
 # there, so the recipes give configure its answers and build what they must
 # run (ncurses' tic) for the build machine too.
-#
-# Sources are kept in build/packages/sources/ and checked against the
-# recipe's sha256. A recipe with none (no checksum was published) is checked
-# against packages/sources.lock, which the first download writes: commit it,
-# and later downloads must match. SQ_LOCKED=1 (CI) refuses to write it.
 #
 # Idempotent: each build starts from a fresh copy of the source; the package
 # is written beside its old one and moved into place.
@@ -62,11 +56,7 @@ SQ_PREFIX=/data/data/dev.squared.sqterm/files/usr
 # files.
 SQ_API=28
 OUT=$ROOT/sq_android/assets/packages
-# Where releases come from (a public repository: no token). SQ_PACKAGES_URL
-# replaces the whole of it (a mirror, or a test): <url>/<tag>/<file>.
-SQ_PACKAGES_REPO=${SQ_PACKAGES_REPO:-squared-netizen/sqterm}
-SQ_PACKAGES_URL=${SQ_PACKAGES_URL:-https://github.com/$SQ_PACKAGES_REPO/releases/download}
-MODE=fetch
+MODE=build
 HOST_TEST=0
 
 say() { printf '== %s\n' "$*"; }
@@ -75,22 +65,20 @@ fail() { printf 'packages: %s\n' "$*" >&2; exit 1; }
 names=()
 while [ $# -gt 0 ]; do
   case $1 in
-    --build) MODE=build ;;
-    --host-test) MODE=build; HOST_TEST=1 ;;
+    --host-test) HOST_TEST=1 ;;
     --tag) MODE=tag ;;
     --list)
       for name in $ORDER; do
         (. "$RECIPES/$name/recipe.sh"; printf '  %-10s %s\n' "$name" "$version")
       done
       exit 0 ;;
-    -h | --help) sed -n '2,46p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,40p' "$0"; exit 0 ;;
     -*) fail "unknown option: $1 (see --help)" ;;
     *) [ -f "$RECIPES/$1/recipe.sh" ] || fail "no recipe: packages/$1/recipe.sh"
        names+=("$1") ;;
   esac
   shift
 done
-[ ${#names[@]} -eq 0 ] || [ "$MODE" = build ] || fail "naming a package builds it: --build ${names[*]}"
 [ ${#names[@]} -gt 0 ] || read -r -a names <<< "$ORDER"
 
 need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is missing${2:+ (Termux: pkg install $2)}"; }
@@ -107,47 +95,9 @@ packages_tag() {
   printf 'packages-%s\n' "$key"
 }
 
-# Download the release for these recipes into $OUT, every file checked
-# against its SHA256SUMS; what was there before goes only once all of it
-# has arrived and matched.
-fetch_release() {
-  need curl curl
-  need sha256sum coreutils
-  local tag base staging sum file
-  tag=$(packages_tag)
-  base=$SQ_PACKAGES_URL/$tag
-  staging=$WORK/download
-  rm -rf "$staging"
-  mkdir -p "$staging"
-  say "release $tag ($SQ_PACKAGES_URL)"
-  if ! curl -fsSL --retry 3 --connect-timeout 20 -o "$staging/SHA256SUMS" "$base/SHA256SUMS"; then
-    rm -rf "$staging"
-    fail "no release $tag yet: CI builds one when these recipes reach main
-          (github.com/$SQ_PACKAGES_REPO/actions). Or build here: make packages-build"
-  fi
-  while read -r sum file; do
-    case $file in
-      *[!A-Za-z0-9._+-]* | '' | .*) fail "$tag: a file name that is not a package's in SHA256SUMS: $file" ;;
-    esac
-    say "download $file"
-    curl -fsSL --retry 3 --connect-timeout 20 -o "$staging/$file" "$base/$file" ||
-      fail "$tag: could not download $file"
-  done < "$staging/SHA256SUMS"
-  ( cd "$staging" && sha256sum -c --quiet SHA256SUMS ) || fail "$tag: a file does not match SHA256SUMS"
-  [ -f "$staging/index" ] || fail "$tag: the release has no index"
-  mkdir -p "$OUT"
-  rm -f "$OUT"/*.tar.zst "$OUT/index"
-  mv "$staging"/*.tar.zst "$staging/index" "$OUT"/
-  rm -rf "$staging"
-  say "index: $(($(wc -l < "$OUT/index") - 1)) package(s) in ${OUT#"$ROOT"/}"
-}
+if [ "$MODE" = tag ]; then packages_tag; exit 0; fi
 
-case $MODE in
-  tag) packages_tag; exit 0 ;;
-  fetch) mkdir -p "$WORK"; fetch_release; exit 0 ;;
-esac
-
-for tool in curl tar xz zstd make sha256sum; do need "$tool" "$tool"; done
+for tool in tar xz zstd make sha256sum; do need "$tool" "$tool"; done
 need clang clang
 
 # The toolchain. For Android: this host's clang (on CI, the NDK's), aimed at
@@ -194,32 +144,21 @@ export CPPFLAGS="" PKG_CONFIG=/bin/false
 JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 mkdir -p "$SOURCES" "$OUT" "$WORK"
 
-# Download $url (or one of $mirrors) as $file, and check it.
-fetch() {
+# The source, already downloaded (tools/fetch_packages.sh --sources), checked
+# against the recipe's sha256 or packages/sources.lock. No download here.
+check_source() {
   local path=$SOURCES/$file
-  if [ ! -f "$path" ]; then
-    local got=0
-    for from in $url $mirrors; do
-      say "download $from"
-      if curl -fL --retry 3 --connect-timeout 20 -o "$path.part" "$from"; then got=1; break; fi
-    done
-    [ "$got" = 1 ] || fail "$name: could not download $file"
-    mv "$path.part" "$path"
-  fi
-  local actual
+  [ -f "$path" ] || fail "$name: no source build/packages/sources/$file
+          (offline: download the sources first, once: tools/fetch_packages.sh --sources)"
+  local actual expected=$sha256
   actual=$(sha256sum "$path" | cut -d ' ' -f 1)
-  local expected=$sha256
   if [ -z "$expected" ] && [ -f "$LOCK" ]; then
     expected=$(awk -v f="$file" '$1 == f { print $2 }' "$LOCK")
   fi
-  if [ -z "$expected" ] && [ "${SQ_LOCKED:-0}" = 1 ]; then
-    fail "$file: no sha256 in the recipe or packages/sources.lock, and SQ_LOCKED=1: build it on the phone once and commit sources.lock"
-  elif [ -z "$expected" ]; then
-    printf '%s %s\n' "$file" "$actual" >> "$LOCK"
-    say "$file: no published sha256; recorded $actual in packages/sources.lock (commit it)"
-  elif [ "$actual" != "$expected" ]; then
-    fail "$file: sha256 $actual, expected $expected (delete build/packages/sources/$file to download it again)"
-  fi
+  [ -n "$expected" ] || fail "$file: no sha256 in the recipe or packages/sources.lock
+          (tools/fetch_packages.sh --sources records one)"
+  [ "$actual" = "$expected" ] ||
+    fail "$file: sha256 $actual, expected $expected (delete build/packages/sources/$file and fetch it again)"
 }
 
 # What a dependency installed (its headers and static libraries), for the next build.
@@ -240,7 +179,7 @@ build_one() {
   version= url= mirrors= sha256= file= top= depends= keep=
   . "$recipe_dir/recipe.sh"
   say "$name $version"
-  fetch
+  check_source
   local here=$WORK/$name
   rm -rf "$here"
   mkdir -p "$here"

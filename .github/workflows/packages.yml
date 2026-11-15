@@ -1,5 +1,7 @@
-# sqterm's packages (12.5): built here, published as a release, downloaded by
-# `make packages` on the phone (packages/build.sh, decided 2026-11-04).
+# sqterm's packages (12.5): built here, published as a release, downloaded on
+# the phone by tools/fetch_packages.sh, a deliberate step (decided
+# 2026-11-04). The build itself is offline, here as on the phone: the sources
+# are fetched first, then packages/build.sh runs.
 #
 # The release is named after the recipes: packages-<key>, where
 # `bash packages/build.sh --tag` gives the key (a sha256 of the recipes, the
@@ -76,16 +78,21 @@ jobs:
           key: package-sources-${{ hashFiles('packages/*/recipe.sh', 'packages/sources.lock') }}
           restore-keys: package-sources-
 
-      - name: Build
+      - name: Sources
         if: steps.release.outputs.exists != 'true'
         env:
           # A source with no sha256 anywhere fails here rather than being
           # recorded: sources.lock is written on the phone and committed.
           SQ_LOCKED: "1"
+        run: bash tools/fetch_packages.sh --sources
+
+      - name: Build (offline)
+        if: steps.release.outputs.exists != 'true'
+        env:
           CC_FOR_BUILD: gcc
         run: |
           clang --version | head -n 1
-          bash packages/build.sh --build
+          bash packages/build.sh
 
       - name: The build logs, when it failed
         if: failure()
@@ -118,7 +125,7 @@ jobs:
           {
             echo "sqterm's packages, built from $GITHUB_SHA for Android API 28 (arm64)."
             echo
-            echo "On the phone, in sqterm's folder: make packages"
+            echo "On the phone, in sqterm's folder: tools/fetch_packages.sh"
             echo
             echo '```'
             cat dist/index
