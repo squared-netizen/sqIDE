@@ -1,13 +1,16 @@
-# sqterm's packages (12.5): built here, published as a release, downloaded on
-# the phone by tools/fetch_packages.sh, a deliberate step (decided
-# 2026-11-04). The build itself is offline, here as on the phone: the sources
-# are fetched first, then packages/build.sh runs.
+# sqterm's packages (12.5): built here, added to the GitHub release named
+# `packages`, downloaded on the phone by tools/fetch_packages.sh, a
+# deliberate step (decided 2026-11-04). The build itself is offline, here as
+# on the phone: the sources are fetched first, then packages/build.sh runs.
 #
-# The release is named after the recipes: packages-<key>, where
-# `bash packages/build.sh --tag` gives the key (a sha256 of the recipes, the
-# script, sources.lock, terminfo/sqterm.ti and the API level). A release that
-# exists is never built again. A pull request builds and keeps the result as
-# a workflow artifact; only main (or a run started by hand) publishes.
+# Each package has its own key (`bash packages/build.sh --keys`: its recipe,
+# what it depends on, the API level), and its archive is
+# <name>-<version>-<key>.tar.zst in the release. Only packages whose archive
+# is missing are built: a recipe changed rebuilds that package and what
+# depends on it. Finished builds are kept in the Actions cache, so a package
+# that is up to date is not built again to serve one that depends on it.
+# A pull request builds and keeps the result as an artifact; only main (or a
+# run started by hand on main) adds to the release.
 name: packages
 
 on:
@@ -34,31 +37,31 @@ concurrency:
 env:
   # The NDK the phone builds with ($PREFIX/opt/android-sdk/ndk/<version>).
   NDK_VERSION: 29.0.14206865
+  RELEASE: packages
 
 jobs:
   packages:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 350
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: The release these recipes need
-        id: release
+      - name: Which archives the release lacks
+        id: plan
         run: |
-          tag=$(bash packages/build.sh --tag)
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          if gh release view "$tag" > /dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "$tag is published already: nothing to build"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "$tag: building"
-          fi
+          bash packages/build.sh --keys | tee keys.txt
+          gh release view "$RELEASE" --json assets --jq '.assets[].name' > have.txt 2>/dev/null || : > have.txt
+          missing=
+          while read -r name version key; do
+            grep -qx "$name-$version-$key.tar.zst" have.txt || missing="$missing $name"
+          done < keys.txt
+          echo "missing=${missing# }" >> "$GITHUB_OUTPUT"
+          echo "to build:${missing:- nothing}"
 
       - name: The NDK, its clang first on PATH
-        if: steps.release.outputs.exists != 'true'
+        if: steps.plan.outputs.missing != ''
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
           ndk=$ANDROID_HOME/ndk/$NDK_VERSION
@@ -67,45 +70,55 @@ jobs:
           echo "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
 
       - name: Tools
-        if: steps.release.outputs.exists != 'true'
+        if: steps.plan.outputs.missing != ''
         run: sudo apt-get install -y --no-install-recommends zstd xz-utils
 
       - name: Sources, kept between runs
-        if: steps.release.outputs.exists != 'true'
+        if: steps.plan.outputs.missing != ''
         uses: actions/cache@v4
         with:
           path: build/packages/sources
           key: package-sources-${{ hashFiles('packages/*/recipe.sh', 'packages/sources.lock') }}
           restore-keys: package-sources-
 
+      - name: Finished builds, kept between runs
+        if: steps.plan.outputs.missing != ''
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/packages/*/key
+            build/packages/*/dest
+            sq_android/assets/packages
+          key: package-builds-${{ hashFiles('packages/**', 'terminfo/sqterm.ti') }}
+          restore-keys: package-builds-
+
       - name: Sources
-        if: steps.release.outputs.exists != 'true'
+        if: steps.plan.outputs.missing != ''
         env:
           # On main a source with no sha256 anywhere fails: only what is
           # recorded in packages/sources.lock is built and published. Any
-          # other branch (a pull request, or a run started by hand on it)
-          # records the first download of a new source (GNU publishes no
-          # sha256), prints it, and fails after the build: the line is
-          # committed to that branch, where it is reviewed.
+          # other branch records the first download of a new source (GNU
+          # publishes no sha256), prints it, and fails after the build: the
+          # line is committed to that branch, where it is reviewed.
           SQ_LOCKED: ${{ github.ref == 'refs/heads/main' && '1' || '0' }}
         run: |
           cp packages/sources.lock "$RUNNER_TEMP/sources.lock.before"
           bash tools/fetch_packages.sh --sources
 
-      - name: Build (offline)
-        if: steps.release.outputs.exists != 'true'
+      - name: Build (offline; up-to-date packages are skipped)
+        if: steps.plan.outputs.missing != ''
         env:
           CC_FOR_BUILD: gcc
         run: |
           clang --version | head -n 1
           bash packages/build.sh
 
-      - name: New sources.lock lines, to commit to the pull request
-        if: always() && github.ref != 'refs/heads/main' && steps.release.outputs.exists != 'true'
+      - name: New sources.lock lines, to commit to the branch
+        if: always() && github.ref != 'refs/heads/main' && steps.plan.outputs.missing != ''
         run: |
           if ! cmp -s "$RUNNER_TEMP/sources.lock.before" packages/sources.lock; then
-            echo "packages/sources.lock gained lines; commit them to this pull request:"
-            diff "$RUNNER_TEMP/sources.lock.before" packages/sources.lock | sed -n 's/^> //p' | tee new-sources.lock
+            echo "packages/sources.lock gained lines; commit them to this branch:"
+            diff "$RUNNER_TEMP/sources.lock.before" packages/sources.lock | sed -n 's/^> //p'
             exit 1
           fi
 
@@ -117,33 +130,27 @@ jobs:
           path: build/packages/*/build.log
           if-no-files-found: ignore
 
-      - name: What the release holds
-        if: steps.release.outputs.exists != 'true'
+      - name: The archives the release lacks
+        if: steps.plan.outputs.missing != ''
         run: |
           mkdir dist
-          cp sq_android/assets/packages/index sq_android/assets/packages/*.tar.zst dist/
-          cd dist
-          sha256sum index *.tar.zst > SHA256SUMS
-          cat index
-          cat SHA256SUMS
+          while read -r name version key; do
+            asset=$name-$version-$key.tar.zst
+            grep -qx "$asset" have.txt && continue
+            cp "sq_android/assets/packages/$name-$version.tar.zst" "dist/$asset"
+            ( cd dist && sha256sum "$asset" > "$asset.sha256" && cat "$asset.sha256" )
+          done < keys.txt
 
       - uses: actions/upload-artifact@v4
-        if: steps.release.outputs.exists != 'true'
+        if: steps.plan.outputs.missing != ''
         with:
-          name: ${{ steps.release.outputs.tag }}
+          name: packages
           path: dist/
 
-      - name: Publish
-        if: steps.release.outputs.exists != 'true' && github.event_name != 'pull_request'
+      - name: Add them to the release
+        if: steps.plan.outputs.missing != '' && github.ref == 'refs/heads/main'
         run: |
-          tag=${{ steps.release.outputs.tag }}
-          {
-            echo "sqterm's packages, built from $GITHUB_SHA for Android API 28 (arm64)."
-            echo
-            echo "On the phone, in sqterm's folder: tools/fetch_packages.sh"
-            echo
-            echo '```'
-            cat dist/index
-            echo '```'
-          } > notes.md
-          gh release create "$tag" dist/* --target "$GITHUB_SHA" --title "$tag" --notes-file notes.md
+          gh release view "$RELEASE" > /dev/null 2>&1 ||
+            gh release create "$RELEASE" --target "$GITHUB_SHA" --title "sqterm packages" \
+              --notes "Every package CI has built, one archive per key: <name>-<version>-<key>.tar.zst, with its .sha256. On the phone, in sqterm's folder: tools/fetch_packages.sh"
+          gh release upload "$RELEASE" dist/*

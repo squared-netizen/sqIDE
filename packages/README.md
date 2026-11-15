@@ -50,21 +50,30 @@ make packages                     # offline; or: bash packages/build.sh [name...
 make dev
 ```
 
-`tools/fetch_packages.sh` downloads the release named after the recipes as
-they are in this folder, `packages-<key>` (`bash packages/build.sh --tag`
-prints it; the key is a sha256 of `build.sh`, the recipes and their files,
-`sources.lock`, `terminfo/sqterm.ti` and the API level), checks each file
-against the release's `SHA256SUMS`, and only then replaces what was in
-`sq_android/assets/packages/` (not kept in git; the APK build packs it). The
-repository is public: no token. Those sha256s guard against a broken
-download; they come from the same release, so they are not a signature.
-`--dry-run` says what it would download.
+**One key a package.** `bash packages/build.sh --keys` prints each package's
+name, version and key: 16 hex digits of a sha256 over its recipe folder (not
+the READMEs), the files outside it the recipe names in `inputs` (ncurses:
+`terminfo/sqterm.ti`), `build.sh`, its line in `sources.lock`, the API level,
+and the keys of what it depends on. A recipe changed changes that package's
+key and the keys of what depends on it, nothing else.
 
-CI builds a release when a change to `packages/` or `terminfo/sqterm.ti`
-reaches `main`, or when started by hand; a release that exists is not built
-again. A pull request builds too, and keeps the result as a workflow
-artifact without publishing it. CI runs the same two steps: the sources
-first, then the offline build.
+`tools/fetch_packages.sh` downloads `<name>-<version>-<key>.tar.zst` for each
+recipe as it is in this folder, from the GitHub release named `packages`,
+checks each against the `.sha256` beside it, and only once all have arrived
+and matched replaces what was in `sq_android/assets/packages/` (not kept in
+git; the APK build packs it) and writes the index. The repository is public:
+no token. Those sha256s guard against a broken download; they come from the
+same release, so they are not a signature. `--dry-run` says what it would
+download.
+
+CI builds only the packages whose archive the release lacks, when a change
+to `packages/` or `terminfo/sqterm.ti` reaches `main`, or when started by
+hand, and adds them to the release. Finished builds are kept in the Actions
+cache, and `build.sh` skips a package whose key, archive and install are
+already there (here as on CI), so an up-to-date package is not built again
+for one that depends on it. A pull request builds too, and keeps the result
+as a workflow artifact without publishing it. CI runs the same two steps:
+the sources first, then the offline build.
 
 The first build here takes several minutes (ncurses, then zsh). Commit
 `packages/sources.lock` when it changes: ncurses publishes a signature but no
