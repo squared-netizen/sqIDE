@@ -84,7 +84,12 @@ recipe_build() {
   # clang's default configuration (clang 16 and later read <driver>.cfg
   # beside the binary; <CFG> is that folder).
   mkdir -p "$dest$SQ_PREFIX/bin"
-  printf '%s\n' '--sysroot=<CFG>/../share/sysroot' > "$dest$SQ_PREFIX/bin/clang.cfg"
+  # -D__BIONIC_CTYPE_INLINE=inline: bionic's <ctype.h> makes isalpha and
+  # the rest `static inline` otherwise, which `import std` cannot export
+  # (libc++'s std module re-exports them); inline, they are the ones libc
+  # exports. squared's own Android build passes the same.
+  printf '%s\n' '--sysroot=<CFG>/../share/sysroot' '-D__BIONIC_CTYPE_INLINE=inline' \
+    > "$dest$SQ_PREFIX/bin/clang.cfg"
   cp "$dest$SQ_PREFIX/bin/clang.cfg" "$dest$SQ_PREFIX/bin/clang++.cfg"
 
   # The proof: a C program compiles and links against it (the build

@@ -85,9 +85,12 @@ recipe_build() {
   rm -rf "$rd" && mkdir -p "$rd"
   cp -R "$("$bin/clang" -print-resource-dir)/include" "$rd/"
   cp -R "$here_prefix/lib/clang/$major/lib" "$rd/"
+  # -D__BIONIC_CTYPE_INLINE=inline, as the sysroot's clang.cfg gives every
+  # compile in sqterm: import std cannot export bionic's static inline ctype.
   local -a cxx=("$bin/clang++" --target="$triple" --sysroot="$sysroot" -resource-dir="$rd"
                 -nostdinc++ -isystem "$here_prefix/include/$triple/c++/v1"
                 -isystem "$here_prefix/include/c++/v1" -std=c++23 -fuse-ld=lld
+                -D__BIONIC_CTYPE_INLINE=inline
                 -rtlib=compiler-rt -unwindlib=libunwind -stdlib=libc++ -static-libstdc++
                 -L"$here_prefix/lib/$triple")
   printf '#include <cstdio>\n#include <string>\nint main() { std::string s = "hello"; std::puts(s.c_str()); }\n' > ../hello.cpp
