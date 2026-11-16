@@ -140,10 +140,44 @@ fetch_one() {
   fail "no recipe: packages/$want"
 }
 
+# A git source (a recipe's git= and tag=): a shallow clone at the tag, in
+# build/packages/sources/NAME-TAG.git. Its commit is checked against
+# packages/sources.lock ("NAME@TAG COMMIT"), or recorded there on the first
+# fetch, as a sha256 is for a file (SQ_LOCKED=1 refuses to record).
+fetch_git() {
+  local name=$1 repo=$2 tag=$3 dir expected actual
+  need git git
+  dir=$SOURCES/$name-$tag.git
+  expected=$(awk -v g="$name@$tag" '$1 == g { print $2 }' "$LOCK" 2>/dev/null)
+  if [ -d "$dir/.git" ] && [ -n "$expected" ] && [ "$(git -C "$dir" rev-parse HEAD)" = "$expected" ]; then
+    say have "$name@$tag"
+    return
+  fi
+  if [ "$DRY" = 1 ]; then say would "$name@$tag ($repo)"; return; fi
+  rm -rf "$dir"
+  mkdir -p "$SOURCES"
+  say clone "$repo $tag"
+  git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$repo" "$dir" ||
+    fail "$name: could not clone $repo at $tag"
+  actual=$(git -C "$dir" rev-parse HEAD)
+  if [ -z "$expected" ] && [ "${SQ_LOCKED:-0}" = 1 ]; then
+    rm -rf "$dir"
+    fail "$name@$tag: no commit in packages/sources.lock, and SQ_LOCKED=1"
+  elif [ -z "$expected" ]; then
+    printf '%s %s\n' "$name@$tag" "$actual" >> "$LOCK"
+    say recorded "$name@$tag $actual in packages/sources.lock (commit it)"
+  elif [ "$actual" != "$expected" ]; then
+    rm -rf "$dir"
+    fail "$name@$tag: commit $actual, expected $expected (the tag moved?)"
+  fi
+  say checked "$name@$tag"
+}
+
 fetch_source() {
-  local name=$1 version= url= mirrors= sha256= file= from got=0 actual expected
+  local name=$1 version= url= mirrors= sha256= file= git= tag= from got=0 actual expected
   # The recipe's source fields only; its functions are not run.
   . "$RECIPES/$name/recipe.sh"
+  if [ -n "$git" ]; then fetch_git "$name" "$git" "$tag"; return; fi
   if [ -z "$file" ]; then say local "$name (built from this repository)"; return; fi
   local path=$SOURCES/$file
   expected=$sha256

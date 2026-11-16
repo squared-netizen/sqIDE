@@ -11,7 +11,9 @@
 # the NDK's link refuses (and one binary has none to give).
 #
 # Large: not in the APK (bundled=no). tools/fetch_packages.sh --get llvm
-# downloads it; in sqterm, pkg install it --consume.
+# downloads it; in sqterm, pkg install it --consume. LLVM_APPEND_VC_REV is
+# off: the sources sit inside sqterm's repository, and clang --version named
+# sqterm's commit as its own.
 #
 # Built on CI: hours on a phone. It needs CMake and Ninja, and a C++
 # compiler for this machine (CXX_FOR_BUILD) for LLVM's tablegen, which runs
@@ -68,6 +70,7 @@ recipe_build() {
       -DCROSS_TOOLCHAIN_FLAGS_NATIVE="-DCMAKE_C_COMPILER=${CC_FOR_BUILD:-cc};-DCMAKE_CXX_COMPILER=${CXX_FOR_BUILD:-c++}" \
       -DLLVM_TOOL_LLVM_DRIVER_BUILD=ON -DLLVM_INSTALL_TOOLCHAIN_ONLY=ON \
       -DLLVM_ENABLE_PLUGINS=OFF -DCLANG_PLUGIN_SUPPORT=OFF -DCLANG_BUILD_EXAMPLES=OFF \
+      -DLLVM_APPEND_VC_REV=OFF \
       -DCLANG_DEFAULT_CXX_STDLIB=libc++ -DCLANG_DEFAULT_RTLIB=compiler-rt \
       -DCLANG_DEFAULT_UNWINDLIB=libunwind -DCLANG_DEFAULT_LINKER=lld \
       -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=16384" \
@@ -77,6 +80,10 @@ recipe_build() {
 }
 
 recipe_after() {
+  # Links for other systems' toolchains (Windows, macOS, WebAssembly) the
+  # components bring, and git-clang-format (Python and git, not here).
+  rm -f bin/clang-cl bin/lld-link bin/ld64.lld bin/wasm-ld bin/llvm-lib bin/llvm-dlltool \
+        bin/llvm-otool bin/llvm-install-name-tool bin/llvm-bitcode-strip bin/git-clang-format
   mkdir -p share/licenses/llvm
   cp "$src/llvm/LICENSE.TXT" share/licenses/llvm/LICENSE.TXT
 }
