@@ -52,8 +52,12 @@ recipe_build() {
   # Stubs: libc, libm, libdl, from their symbol lists.
   local l map
   for l in libc libm libdl; do
-    map=$(ls "$src"/$l/$l.map.txt "$src"/libc/$l.map.txt 2>/dev/null | head -n 1)
-    [ -f "$map" ] || { echo "no symbol list for $l" >&2; return 1; }
+    # libc/libc.map.txt, libm/libm.map.txt, libdl/libdl.map.txt.
+    map=
+    for candidate in "$src/$l/$l.map.txt" "$src/libc/$l.map.txt"; do
+      if [ -f "$candidate" ]; then map=$candidate; break; fi
+    done
+    [ -n "$map" ] || { echo "no symbol list for $l" >&2; return 1; }
     awk -v api="$SQ_API" -v arch=arm64 -v mode=c -f "$ROOT/packages/sysroot/stubgen.awk" "$map" > "$l.c"
     awk -v api="$SQ_API" -v arch=arm64 -v mode=map -f "$ROOT/packages/sysroot/stubgen.awk" "$map" > "$l.map"
     "$clang" --target="aarch64-linux-android$SQ_API" -nostdlib -shared -fPIC -fno-builtin -w \
