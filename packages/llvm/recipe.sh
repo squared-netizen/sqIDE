@@ -29,6 +29,14 @@ depends=
 bundled=no
 keep="bin lib/clang share/licenses/llvm"
 
+# What is built and installed: the driver (bin/llvm) and the tools linked to
+# it, clang's builtin headers. Not the rest of clang's tools, each a full
+# static binary of its own (clang-repl alone was 91 MB): the first build
+# installed everything and came to 130 MB packed.
+components="llvm-driver;clang;clang-resource-headers;lld;clang-format;clang-scan-deps"
+components="$components;llvm-ar;llvm-nm;llvm-objcopy;llvm-objdump;llvm-readobj"
+components="$components;llvm-symbolizer;llvm-size;llvm-strings;llvm-cxxfilt"
+
 recipe_build() {
   [ -n "${SQ_NDK:-}" ] || { echo "llvm is built for Android only (the NDK's CMake toolchain)" >&2; return 1; }
   local -a launch=()
@@ -62,9 +70,10 @@ recipe_build() {
       -DLLVM_ENABLE_PLUGINS=OFF -DCLANG_PLUGIN_SUPPORT=OFF -DCLANG_BUILD_EXAMPLES=OFF \
       -DCLANG_DEFAULT_CXX_STDLIB=libc++ -DCLANG_DEFAULT_RTLIB=compiler-rt \
       -DCLANG_DEFAULT_UNWINDLIB=libunwind -DCLANG_DEFAULT_LINKER=lld \
-      -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
-  ninja -C ../android -j"$JOBS"
-  DESTDIR="$dest" ninja -C ../android install
+      -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=16384" \
+      -DLLVM_DISTRIBUTION_COMPONENTS="$components"
+  ninja -C ../android -j"$JOBS" distribution
+  DESTDIR="$dest" ninja -C ../android install-distribution
 }
 
 recipe_after() {
