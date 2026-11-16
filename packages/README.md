@@ -127,6 +127,12 @@ for API 28, and the crt objects, all from AOSP's bionic (a git source,
 NDK. `stubgen.awk` turns bionic's symbol lists into the stubs. It also
 installs `bin/clang.cfg` and `bin/clang++.cfg`, so plain `clang` uses it.
 
+**runtimes** (`bundled=no`): compiler-rt's builtins, libunwind, libc++abi and
+libc++ 23, static, with libc++'s module sources (`import std`), built from
+the same LLVM sources against the sysroot by a clang 23 for the build
+machine (apt.llvm.org's on CI). With llvm and sysroot, clang in sqterm
+compiles, links and runs C and C++ programs, modules included.
+
 ## The manifest, and pkg
 
 Every package carries `SQ-INF/manifest.json`, written by `build.sh`: the
