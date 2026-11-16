@@ -120,6 +120,13 @@ llvm is built on CI only (hours on a phone): CMake and Ninja, the NDK's CMake
 toolchain, LLVM's tablegen built for the build machine first
 (`CXX_FOR_BUILD`), ccache kept between runs.
 
+**sysroot** (`bundled=no`) is what that clang compiles and links against:
+bionic's headers and the kernel's, libc, libm and libdl as link-time stubs
+for API 28, and the crt objects, all from AOSP's bionic (a git source,
+`git=` and `tag=` in the recipe, its commit in `sources.lock`), not from the
+NDK. `stubgen.awk` turns bionic's symbol lists into the stubs. It also
+installs `bin/clang.cfg` and `bin/clang++.cfg`, so plain `clang` uses it.
+
 ## The manifest, and pkg
 
 Every package carries `SQ-INF/manifest.json`, written by `build.sh`: the

@@ -47,7 +47,7 @@ RECIPES=$ROOT/packages
 WORK=$ROOT/build/packages
 SOURCES=$WORK/sources
 LOCK=$RECIPES/sources.lock
-ORDER="pkg ncurses zsh bash coreutils sed grep gawk make llvm"
+ORDER="pkg ncurses zsh bash coreutils sed grep gawk make llvm sysroot"
 
 # Where the app's prefix is: what every program is built to find its files
 # under. The app's getFilesDir() is /data/user/0/dev.squared.sqterm/files,
@@ -103,7 +103,7 @@ package_key() (
       for path in ${inputs:-}; do echo "$path"; done
       echo packages/build.sh; } | LC_ALL=C sort |
       while read -r path; do printf '%s %s\n' "$(sha256sum "$ROOT/$path" | cut -d ' ' -f 1)" "$path"; done
-    awk -v f="$file" '$1 == f' "$LOCK"
+    awk -v f="$file" -v g="$1@${tag:-}" '$1 == f || $1 == g' "$LOCK"
     printf 'api %s\n' "$SQ_API"
     for dependency in $depends; do printf 'depends %s %s\n' "$dependency" "$(package_key "$dependency")"; done
   } | sha256sum | cut -c 1-16
@@ -243,7 +243,7 @@ build_one() {
   local recipe_dir=$RECIPES/$name
   # The recipe's variables and functions, fresh for each package.
   unset -f recipe_patch recipe_build recipe_after 2>/dev/null || true
-  version= url= mirrors= sha256= file= top= depends= keep= inputs= license= bundled=
+  version= url= mirrors= sha256= file= top= depends= keep= inputs= license= bundled= git= tag=
   . "$recipe_dir/recipe.sh"
   local here=$WORK/$name key
   key=$(package_key "$name")
@@ -262,7 +262,19 @@ build_one() {
   rm -rf "$here"
   mkdir -p "$here"
   dest=$here/dest
-  if [ -n "$file" ]; then
+  if [ -n "$git" ]; then
+    # A git source (git= and tag=): the clone tools/fetch_packages.sh made,
+    # at the commit sources.lock records for name@tag. Read in place: a
+    # recipe must not change it.
+    src=$SOURCES/$name-$tag.git
+    [ -d "$src/.git" ] || fail "$name: no clone build/packages/sources/$name-$tag.git
+          (offline: tools/fetch_packages.sh --sources $name)"
+    local want
+    want=$(awk -v g="$name@$tag" '$1 == g { print $2 }' "$LOCK")
+    [ -n "$want" ] || fail "$name: no commit for $name@$tag in packages/sources.lock"
+    [ "$(git -C "$src" rev-parse HEAD)" = "$want" ] ||
+      fail "$name: the clone is not at $want (delete build/packages/sources/$name-$tag.git and fetch it again)"
+  elif [ -n "$file" ]; then
     check_source
     tar -xf "$SOURCES/$file" -C "$here"
     src=$here/$top
