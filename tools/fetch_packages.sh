@@ -9,6 +9,11 @@
 #   tools/fetch_packages.sh --sources [name...]  the recipes' sources, into
 #                                              build/packages/sources/, to
 #                                              build here: then make packages
+#   tools/fetch_packages.sh --get NAME [DIR]   a large package (not in the APK),
+#                                              into DIR (default
+#                                              ~/storage/downloads, Termux's
+#                                              link to Download): then in
+#                                              sqterm, pkg install it --consume
 #   tools/fetch_packages.sh --dry-run [...]    say what it would download
 #
 # The packages: CI (.github/workflows/packages.yml) builds each package once
@@ -55,23 +60,32 @@ names=()
 while [ $# -gt 0 ]; do
   case $1 in
     --sources) MODE=sources ;;
+    --get) MODE=get ;;
     --dry-run) DRY=1 ;;
     -h | --help) sed -n '2,34p' "$0"; exit 0 ;;
     -*) fail "unknown option: $1 (see --help)" ;;
-    *) [ -f "$RECIPES/$1/recipe.sh" ] || fail "no recipe: packages/$1/recipe.sh"
+    *) # After --get NAME, a second word is the folder.
+       if [ "$MODE" = get ] && [ ${#names[@]} -eq 1 ]; then names+=("$1"); shift; continue; fi
+       [ -f "$RECIPES/$1/recipe.sh" ] || fail "no recipe: packages/$1/recipe.sh"
        names+=("$1") ;;
   esac
   shift
 done
-[ ${#names[@]} -eq 0 ] || [ "$MODE" = sources ] || fail "naming a package fetches its source: --sources ${names[*]}"
+if [ "$MODE" = get ]; then
+  [ ${#names[@]} -ge 1 ] && [ ${#names[@]} -le 2 ] || fail "--get NAME [DIR]"
+elif [ ${#names[@]} -gt 0 ] && [ "$MODE" != sources ]; then
+  fail "naming a package fetches its source: --sources ${names[*]}"
+fi
 need curl curl
 need sha256sum coreutils
 
 fetch_release() {
   local base=$SQ_PACKAGES_URL/packages staging name version key asset
   local -a wanted=()
-  while read -r name version key; do wanted+=("$name $version $key"); done \
-    < <(bash "$RECIPES/build.sh" --keys)
+  local bundled
+  while read -r name version key bundled; do
+    [ "$bundled" = no ] || wanted+=("$name $version $key")
+  done < <(bash "$RECIPES/build.sh" --keys)
   say release "packages ($SQ_PACKAGES_URL)"
   if [ "$DRY" = 1 ]; then
     for line in "${wanted[@]}"; do read -r name version key <<< "$line"; say would "$name-$version-$key.tar.zst"; done
@@ -100,6 +114,30 @@ fetch_release() {
   rm -rf "$staging"
   bash "$RECIPES/build.sh" --index > /dev/null
   say packages "${#wanted[@]} in ${OUT#"$ROOT"/}, checked"
+}
+
+# A large package (bundled=no, not in the APK), downloaded into DIR for pkg
+# to install: in sqterm, pkg install DIR/<file> --consume.
+fetch_one() {
+  local want=$1 dir=$2 name version key bundled base=$SQ_PACKAGES_URL/packages asset
+  while read -r name version key bundled; do
+    [ "$name" = "$want" ] || continue
+    asset=$name-$version-$key.tar.zst
+    say release "packages ($SQ_PACKAGES_URL)"
+    if [ "$DRY" = 1 ]; then say would "$asset into $dir"; return; fi
+    mkdir -p "$dir"
+    say download "$asset"
+    get "$dir/$asset.part" "$base/$asset" && get "$dir/$asset.sha256" "$base/$asset.sha256" || {
+      rm -f "$dir/$asset.part" "$dir/$asset.sha256"
+      fail "no $asset in the release: CI builds it when its recipe reaches main"; }
+    mv "$dir/$asset.part" "$dir/$asset"
+    ( cd "$dir" && sha256sum -c --quiet "$asset.sha256" ) || fail "$asset does not match its .sha256"
+    rm -f "$dir/$asset.sha256"
+    say checked "$dir/$asset"
+    say next "in sqterm: pkg install <that file> --consume"
+    return
+  done < <(bash "$RECIPES/build.sh" --keys)
+  fail "no recipe: packages/$want"
 }
 
 fetch_source() {
@@ -142,6 +180,8 @@ fetch_source() {
 
 if [ "$MODE" = release ]; then
   fetch_release
+elif [ "$MODE" = get ]; then
+  fetch_one "${names[0]}" "${names[1]:-${HOME}/storage/downloads}"
 else
   [ ${#names[@]} -gt 0 ] || read -r -a names <<< "$(bash "$RECIPES/build.sh" --list | awk '{ printf "%s ", $1 }')"
   for name in "${names[@]}"; do fetch_source "$name"; done
