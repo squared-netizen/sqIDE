@@ -16,7 +16,10 @@
 # needs a recent clang, and the NDK's is 21. Two CMake runs: the builtins,
 # then the runtimes. Nothing links while they build (static libraries,
 # CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY), so neither needs the other
-# first. The recipe ends by linking a C++ program and an `import std` one.
+# first. With nothing linked, CMake's library checks pass for libraries
+# bionic has not (pthread, rt, atomic: in libc, or none), and the objects
+# would ask for them: they are told there are none. The recipe ends by
+# linking a C++ program and an `import std` one.
 
 version=23.1.5
 license="Apache-2.0 WITH LLVM-exception"
@@ -69,7 +72,9 @@ recipe_build() {
       -DLIBCXXABI_USE_LLVM_UNWINDER=ON -DLIBCXXABI_ENABLE_STATIC_UNWINDER=ON \
       -DLIBCXX_ENABLE_STATIC_ABI_LIBRARY=ON -DLIBCXX_INSTALL_MODULES=ON \
       -DLIBCXX_INCLUDE_TESTS=OFF -DLIBCXXABI_INCLUDE_TESTS=OFF -DLIBUNWIND_INCLUDE_TESTS=OFF \
-      -DLIBCXX_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_TESTS=OFF
+      -DLIBCXX_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_TESTS=OFF \
+      -DLIBUNWIND_HAS_PTHREAD_LIB=OFF -DLIBCXXABI_HAS_PTHREAD_LIB=OFF -DLIBCXX_HAS_PTHREAD_LIB=OFF \
+      -DLIBCXX_HAS_RT_LIB=OFF -DLIBCXX_HAS_ATOMIC_LIB=OFF
   ninja -C ../runtimes -j"$JOBS"
   DESTDIR="$dest" ninja -C ../runtimes install
 
