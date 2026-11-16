@@ -95,16 +95,16 @@ jobs:
           key: package-sources-${{ hashFiles('packages/*/recipe.sh', 'packages/sources.lock') }}
           restore-keys: package-sources-
 
-      - name: Finished builds, kept between runs
+      - name: Finished builds, kept between runs (saved even when a run fails)
         if: steps.plan.outputs.missing != ''
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             build/packages/*/key
             build/packages/*/dest
             build/packages/extra
             sq_android/assets/packages
-          key: package-builds-${{ hashFiles('packages/**', 'terminfo/sqterm.ti') }}
+          key: package-builds-${{ github.run_id }}
           restore-keys: package-builds-
 
       - name: Sources
@@ -137,6 +137,17 @@ jobs:
         run: |
           clang --version | head -n 1
           bash packages/build.sh
+
+      - name: Save the finished builds
+        if: always() && steps.plan.outputs.missing != ''
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/packages/*/key
+            build/packages/*/dest
+            build/packages/extra
+            sq_android/assets/packages
+          key: package-builds-${{ github.run_id }}
 
       - name: Save the compiler cache
         if: always() && steps.plan.outputs.missing != ''

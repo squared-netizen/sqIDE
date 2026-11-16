@@ -44,7 +44,8 @@ recipe_build() {
   # folders), bionic's Android additions to it, and arm64's asm.
   cp -R "$src/libc/include/." "$inc/"
   for d in "$k/uapi"/*; do
-    case $(basename "$d") in asm-*) ;; *) cp -R "$d" "$inc/" ;; esac
+    # Not the per-arch asm folders (arm64's goes below); asm-generic, yes.
+    case $(basename "$d") in asm-arm | asm-arm64 | asm-riscv | asm-x86) ;; *) cp -R "$d" "$inc/" ;; esac
   done
   cp -R "$k/android/uapi/." "$inc/"
   cp -R "$k/uapi/asm-arm64/asm" "$inc/aarch64-linux-android/asm"
