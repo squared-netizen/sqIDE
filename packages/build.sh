@@ -47,7 +47,10 @@ RECIPES=$ROOT/packages
 WORK=$ROOT/build/packages
 SOURCES=$WORK/sources
 LOCK=$RECIPES/sources.lock
-ORDER="pkg ncurses zsh bash coreutils sed grep gawk make llvm sysroot"
+# The packages, in the order they build and install: packages/order, a
+# name a line. Its own file, not this script: every key covers this script,
+# and a package added would otherwise rebuild them all.
+ORDER=$(grep -v '^#' "$RECIPES/order" | tr '\n' ' ')
 
 # Where the app's prefix is: what every program is built to find its files
 # under. The app's getFilesDir() is /data/user/0/dev.squared.sqterm/files,

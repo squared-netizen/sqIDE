@@ -1,0 +1,13 @@
+# The packages, in the order they build and install (packages/build.sh).
+pkg
+ncurses
+zsh
+bash
+coreutils
+sed
+grep
+gawk
+make
+llvm
+sysroot
+runtimes
