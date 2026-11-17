@@ -141,7 +141,7 @@ binaries, built as llvm is.
 
 **lldb** (`bundled=no`): lldb, lldb-server, lldb-dap (for an editor) and
 lldb-argdumper, front ends to `liblldb.so`; all of them use the runtimes'
-`libc++_shared.so`, found through `$ORIGIN/../lib`, so install runtimes
+`libc++_shared.so`, found through a RUNPATH of `$PREFIX/lib`, so install runtimes
 first. Built as runtimes are (clang 23 for the build machine, the sysroot,
 no NDK), with CMake told the system is Android. No Python or Lua scripting,
 line editing or curses GUI yet: each is a library to build first.

@@ -7,8 +7,8 @@
 #   bin/lldb-dap         the Debug Adapter Protocol server, for an editor
 #                        (neovim's nvim-dap)
 #   bin/lldb-argdumper   expands a program's arguments as the shell would
-#   lib/liblldb.so.23.1.5  lldb itself (and liblldb.so, a link); the
-#                        programs above are front ends to it
+#   lib/liblldb.so       lldb itself; the programs above are front ends
+#                        to it (no version in its name: Android has none)
 #
 # lldb's core is a shared library, and a program and its shared library
 # must share one C++ library: here the runtimes package's libc++_shared.so.
@@ -20,8 +20,10 @@
 # sources of its own) with CMAKE_SYSTEM_VERSION=1, which makes CMake skip
 # looking for an NDK and take the compiler and sysroot as given.
 #
-# The programs find liblldb.so and libc++_shared.so through their RUNPATH,
-# $ORIGIN/../lib (LLVM's own). Expressions use clang's builtin headers,
+# The programs and liblldb.so find liblldb.so and libc++_shared.so through
+# a RUNPATH of $SQ_PREFIX/lib, given at the link: for Android CMake writes
+# none (the first build here, 2026-11-17, had no RUNPATH at all), and every
+# package is built for this one prefix. Expressions use clang's builtin headers,
 # lib/clang/23, which llvm carries.
 #
 # Not yet: Python and Lua scripting, libedit (line editing and history at
@@ -41,7 +43,7 @@ sha256=
 top=llvm-project-$version.src
 depends="sysroot runtimes"
 bundled=no
-keep="bin lib/liblldb.so lib/liblldb.so.$version share/licenses/lldb"
+keep="bin lib/liblldb.so share/licenses/lldb"
 
 components="lldb;liblldb;lldb-server;lldb-dap;lldb-argdumper"
 
@@ -86,7 +88,7 @@ recipe_build() {
   # 2. lldb for Android, against the sysroot and libc++_shared.so.
   local cflags="-fPIC -resource-dir=$rd"
   local cxxflags="$cflags -nostdinc++ -isystem $rt/include/$triple/c++/v1 -isystem $rt/include/c++/v1"
-  local ldflags="-fuse-ld=lld -rtlib=compiler-rt -unwindlib=libunwind -resource-dir=$rd -nostdlib++ -L$rt/lib/$triple -Wl,-z,max-page-size=16384"
+  local ldflags="-fuse-ld=lld -rtlib=compiler-rt -unwindlib=libunwind -resource-dir=$rd -nostdlib++ -L$rt/lib/$triple -Wl,-z,max-page-size=16384 -Wl,-rpath,$SQ_PREFIX/lib"
   env -u CFLAGS -u CXXFLAGS -u LDFLAGS -u CPPFLAGS \
     cmake -S llvm -B ../android "${common[@]}" -DCMAKE_BUILD_TYPE=MinSizeRel \
       -DCMAKE_SYSTEM_NAME=Android -DCMAKE_SYSTEM_VERSION=1 -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
@@ -113,17 +115,19 @@ recipe_build() {
 
   # The proof (nothing here runs arm64 Android): every program and liblldb
   # need libc++_shared.so.1, the programs liblldb, each finds them through
-  # $ORIGIN/../lib, and nothing asks for a library the phone lacks.
+  # its RUNPATH, and nothing asks for a library the phone lacks.
   local p d
-  for p in bin/lldb bin/lldb-server bin/lldb-dap bin/lldb-argdumper lib/liblldb.so.$version; do
+  for p in bin/lldb bin/lldb-server bin/lldb-dap bin/lldb-argdumper lib/liblldb.so; do
     d=$("$bin/llvm-readelf" -d "$dest$SQ_PREFIX/$p")
     echo "$p:"; echo "$d" | grep -E 'NEEDED|RUNPATH|RPATH'
-    echo "$d" | grep -E 'NEEDED' | grep -vE '\[(libc|libm|libdl|libc\+\+_shared)\.so(\.1)?\]|\[liblldb\.so\.' &&
+    echo "$d" | grep -q "RUNPATH.*\[$SQ_PREFIX/lib\]" || [ "$p" = bin/lldb-argdumper ] ||
+      { echo "$p has no RUNPATH of $SQ_PREFIX/lib" >&2; return 1; }
+    echo "$d" | grep -E 'NEEDED' | grep -vE '\[(libc|libm|libdl|libc\+\+_shared|liblldb)\.so(\.1)?\]' &&
       { echo "$p needs a library sqterm has not" >&2; return 1; }
   done
-  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/lldb" | grep -q 'Shared library: \[liblldb\.so\.'
-  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/lib/liblldb.so.$version" | grep -q 'Shared library: \[libc++_shared\.so\.1\]'
-  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/lldb" | grep -q 'RUNPATH.*\$ORIGIN/\.\./lib'
+  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/lldb" | grep -q 'Shared library: \[liblldb\.so\]'
+  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/lib/liblldb.so" | grep -q 'Shared library: \[libc++_shared\.so\.1\]'
+  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/lldb" | grep -q "RUNPATH.*\[$SQ_PREFIX/lib\]"
   echo "lldb: links against liblldb and libc++_shared.so.1"
 }
 
