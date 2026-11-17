@@ -63,7 +63,12 @@ recipe_build() {
 recipe_after() {
   mkdir -p share/licenses/llvm-tools
   cp "$src/llvm/LICENSE.TXT" share/licenses/llvm-tools/LICENSE.TXT
-  # clang-doc's assets, when its install has none, still a folder to keep.
+  # clang-doc's templates and styles (share/clang-doc, where it looks:
+  # beside bin). The first package had the folder empty (2026-11-17, on the
+  # phone: "cannot open file .../share/clang-doc/md/class-template.mustache"),
+  # so they are copied from the source, whatever the install did.
   # clangd finds clang's builtin headers in lib/clang/23, which llvm carries.
   mkdir -p share/clang-doc
+  cp -R "$src/clang-tools-extra/clang-doc/assets/." share/clang-doc/
+  [ -f share/clang-doc/md/class-template.mustache ]
 }
