@@ -70,7 +70,7 @@ jobs:
           echo "$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
 
       - name: Room on the disk (LLVM's build needs several GB)
-        if: contains(steps.plan.outputs.missing, 'llvm')
+        if: contains(steps.plan.outputs.missing, 'llvm') || contains(steps.plan.outputs.missing, 'lldb')
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL
           df -h /
@@ -79,8 +79,8 @@ jobs:
         if: steps.plan.outputs.missing != ''
         run: sudo apt-get install -y --no-install-recommends zstd xz-utils cmake ninja-build ccache
 
-      - name: clang 23 for this machine (the runtimes; the NDK's clang is 21)
-        if: contains(steps.plan.outputs.missing, 'runtimes')
+      - name: clang 23 for this machine (the runtimes and lldb; the NDK's clang is 21)
+        if: contains(steps.plan.outputs.missing, 'runtimes') || contains(steps.plan.outputs.missing, 'lldb')
         run: |
           curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
           echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm-23.list

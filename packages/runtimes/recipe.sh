@@ -1,11 +1,21 @@
 # runtimes: what clang's programs link with in sqterm's prefix, LLVM 23
 # (step 3): compiler-rt's builtins, libunwind, libc++abi and libc++, with
-# libc++'s module sources for `import std`. Static libraries only: each
-# program carries what it uses (as squared links libc++ into an app), and
-# nothing here is loaded at run time.
+# libc++'s module sources for `import std`. Static libraries for what clang
+# builds by default: each program carries what it uses (as squared links
+# libc++ into an app). And one shared library, libc++_shared.so, for a
+# program and the shared libraries it loads (lldb and liblldb.so), which
+# must share one C++ library, not carry a copy each. Named as the NDK names
+# its own, so it is never taken for Android's libc++.so, and so plain
+# -stdlib=libc++ still links libc++.a: the shared one is asked for by name,
+# -nostdlib++ -lc++_shared.
 #
 #   lib/clang/23/lib/aarch64-unknown-linux-android28/libclang_rt.builtins.a
 #   lib/aarch64-unknown-linux-android28/libc++.a (libc++abi inside), libunwind.a
+#   lib/aarch64-unknown-linux-android28/libc++_shared.so.1.0 (libc++abi and
+#                                         the unwinder inside; soname
+#                                         libc++_shared.so.1, libc++'s ABI
+#                                         version) and its links; links to them
+#                                         in lib/, where RUNPATHs look
 #   include/c++/v1, include/aarch64-unknown-linux-android28/c++/v1/__config_site
 #   share/libc++/v1/std.cppm, std.compat.cppm and the rest; the manifest
 #   clang -print-library-module-manifest-path names
@@ -16,9 +26,14 @@
 # needs a recent clang, and the NDK's is 21. Two CMake runs: the builtins,
 # then the runtimes. Nothing links while they build (static libraries,
 # CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY), so neither needs the other
-# first. With nothing linked, CMake's library checks pass for libraries
+# first; libc++_shared.so links against the builtins of step 1 (a resource
+# directory made for the build: the build machine clang's own headers, these
+# builtins). With nothing linked, CMake's library checks pass for libraries
 # bionic has not (pthread, rt, atomic: in libc, or none), and the objects
-# would ask for them: they are told there are none. The recipe ends by
+# would ask for them: they are told there are none. The same checks would
+# find libgcc, for libc++_shared.so: they are told the runtime library is
+# compiler-rt's, which skips them, and the link is given -rtlib=compiler-rt
+# (apt.llvm.org's clang adds -lgcc itself otherwise: CI, 2026-11-17). The recipe ends by
 # linking a C++ program and an `import std` one.
 
 version=23.1.5
@@ -61,30 +76,36 @@ recipe_build() {
   ninja -C ../builtins -j"$JOBS"
   DESTDIR="$dest" ninja -C ../builtins install
 
+  # A resource directory for linking (libc++_shared.so, then the tests): the
+  # build machine clang's own headers, the builtins just built.
+  local here_prefix=$dest$SQ_PREFIX rd=$PWD/../test-resource-dir
+  rm -rf "$rd" && mkdir -p "$rd"
+  cp -R "$("$bin/clang" -print-resource-dir)/include" "$rd/"
+  cp -R "$here_prefix/lib/clang/$major/lib" "$rd/"
+
   # 2. libunwind, libc++abi and libc++ (libc++abi merged into libc++.a),
-  #    static, with libc++'s modules installed.
+  #    static, with libc++'s modules installed; and libc++_shared.so, the
+  #    static libc++abi and unwinder linked into it, 16 KB pages.
   env -u CFLAGS -u CXXFLAGS -u LDFLAGS -u CPPFLAGS \
     cmake -S runtimes -B ../runtimes "${cross[@]}" \
       -DCMAKE_INSTALL_PREFIX="$SQ_PREFIX" \
       -DLLVM_ENABLE_RUNTIMES="libunwind;libcxxabi;libcxx" \
       -DLLVM_DEFAULT_TARGET_TRIPLE="$triple" \
-      -DLIBUNWIND_ENABLE_SHARED=OFF -DLIBCXXABI_ENABLE_SHARED=OFF -DLIBCXX_ENABLE_SHARED=OFF \
+      -DLIBUNWIND_ENABLE_SHARED=OFF -DLIBCXXABI_ENABLE_SHARED=OFF \
+      -DLIBCXX_ENABLE_SHARED=ON -DLIBCXX_SHARED_OUTPUT_NAME=c++_shared \
+      -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld -rtlib=compiler-rt -resource-dir=$rd -Wl,-z,max-page-size=16384" \
       -DLIBCXXABI_USE_LLVM_UNWINDER=ON -DLIBCXXABI_ENABLE_STATIC_UNWINDER=ON \
       -DLIBCXX_ENABLE_STATIC_ABI_LIBRARY=ON -DLIBCXX_INSTALL_MODULES=ON \
       -DLIBCXX_INCLUDE_TESTS=OFF -DLIBCXXABI_INCLUDE_TESTS=OFF -DLIBUNWIND_INCLUDE_TESTS=OFF \
       -DLIBCXX_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_TESTS=OFF \
       -DLIBUNWIND_HAS_PTHREAD_LIB=OFF -DLIBCXXABI_HAS_PTHREAD_LIB=OFF -DLIBCXX_HAS_PTHREAD_LIB=OFF \
-      -DLIBCXX_HAS_RT_LIB=OFF -DLIBCXX_HAS_ATOMIC_LIB=OFF
+      -DLIBCXX_HAS_RT_LIB=OFF -DLIBCXX_HAS_ATOMIC_LIB=OFF \
+      -DLIBUNWIND_USE_COMPILER_RT=ON -DLIBCXXABI_USE_COMPILER_RT=ON -DLIBCXX_USE_COMPILER_RT=ON
   ninja -C ../runtimes -j"$JOBS"
   DESTDIR="$dest" ninja -C ../runtimes install
 
   # The proof: a C++ program and an `import std` one link against what was
-  # just built and the sysroot (a resource directory for the test: the build
-  # machine clang's own headers, these builtins).
-  local here_prefix=$dest$SQ_PREFIX rd=$PWD/../test-resource-dir
-  rm -rf "$rd" && mkdir -p "$rd"
-  cp -R "$("$bin/clang" -print-resource-dir)/include" "$rd/"
-  cp -R "$here_prefix/lib/clang/$major/lib" "$rd/"
+  # just built and the sysroot, and one against libc++_shared.so.
   # -D__BIONIC_CTYPE_INLINE=inline, as the sysroot's clang.cfg gives every
   # compile in sqterm: import std cannot export bionic's static inline ctype.
   local -a cxx=("$bin/clang++" --target="$triple" --sysroot="$sysroot" -resource-dir="$rd"
@@ -102,10 +123,20 @@ recipe_build() {
   printf 'import std;\nint main() { std::println("hello from import std"); }\n' > ../hello_std.cpp
   "${cxx[@]}" -fmodule-file=std=../std.pcm ../hello_std.cpp ../std.o -o ../hello_std
   "$bin/llvm-readelf" -d ../hello_std | grep 'NEEDED'
-  echo "runtimes: hello and import std link"
+  local shared=$here_prefix/lib/$triple/libc++_shared.so
+  "$bin/llvm-readelf" -d "$shared" | grep -q 'Library soname: \[libc++_shared.so.1\]'
+  "${cxx[@]/-static-libstdc++/-nostdlib++}" ../hello.cpp -lc++_shared -o ../hello_shared
+  "$bin/llvm-readelf" -d ../hello_shared | grep -q 'Shared library: \[libc++_shared.so.1\]'
+  echo "runtimes: hello and import std link; hello_shared needs libc++_shared.so.1"
 }
 
 recipe_after() {
+  # Where a RUNPATH of $SQ_PREFIX/lib ($ORIGIN/../lib from bin) finds it.
+  local f
+  for f in "lib/aarch64-unknown-linux-android$SQ_API"/libc++_shared.so*; do
+    ln -sf "aarch64-unknown-linux-android$SQ_API/${f##*/}" "lib/${f##*/}"
+  done
+  [ -L lib/libc++_shared.so.1 ]
   mkdir -p share/licenses/runtimes
   cp "$src/libcxx/LICENSE.TXT" share/licenses/runtimes/LICENSE.TXT
 }

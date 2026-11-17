@@ -4,10 +4,9 @@
 #
 # Each is a static binary (LLVM's driver build takes none of them), built
 # with the NDK's CMake toolchain as llvm is, the C++ library linked in.
-# lldb is not here yet: its core is a shared library, liblldb.so, and a
-# program and its shared library need one shared C++ library between them,
-# not a static copy each. That waits for a shared libc++ of our own in the
-# runtimes package (not the NDK's).
+# lldb is a package of its own: its core is a shared library, liblldb.so,
+# and a program and its shared library need one shared C++ library between
+# them, not a static copy each (the runtimes' libc++_shared.so).
 #
 # Large: not in the APK (bundled=no). tools/fetch_packages.sh --get
 # llvm-tools; in sqterm, pkg install it --consume.
@@ -64,7 +63,12 @@ recipe_build() {
 recipe_after() {
   mkdir -p share/licenses/llvm-tools
   cp "$src/llvm/LICENSE.TXT" share/licenses/llvm-tools/LICENSE.TXT
-  # clang-doc's assets, when its install has none, still a folder to keep.
+  # clang-doc's templates and styles (share/clang-doc, where it looks:
+  # beside bin). The first package had the folder empty (2026-11-17, on the
+  # phone: "cannot open file .../share/clang-doc/md/class-template.mustache"),
+  # so they are copied from the source, whatever the install did.
   # clangd finds clang's builtin headers in lib/clang/23, which llvm carries.
   mkdir -p share/clang-doc
+  cp -R "$src/clang-tools-extra/clang-doc/assets/." share/clang-doc/
+  [ -f share/clang-doc/md/class-template.mustache ]
 }

@@ -21,7 +21,16 @@ build.sh          checks the sources, builds and packs every recipe, writes the
 sources.lock      sha256s of the sources that publish none, from their first download
 ncurses/recipe.sh ncurses 6.6: the terminal database (sqterm's entry in it), tic, tput
 zsh/recipe.sh     zsh 5.9.2: the shell, static, its modules linked in
-zsh/zshrc         $PREFIX/etc/zshrc: keys, history, completion, a prompt
+zsh/zshrc         $PREFIX/etc/zshrc: keys, history, completion, a prompt; then
+                  what fish does out of the box (colours for files, completion
+                  that ignores case and takes part of a name, Up and Down
+                  searching the history by what is typed, a prompt with the
+                  failed status and the git branch) and the two plugins below
+                  when installed. SQTERM_PLAIN=1 in ~/.zshenv: none of that
+zsh-autosuggestions/, zsh-syntax-highlighting/
+                  zsh scripts (0.7.1, MIT; 0.8.0, BSD), git sources: the rest
+                  of a line offered in grey as it is typed, and the line
+                  coloured (a command that does not exist in red)
 pkg/recipe.sh     pkg (sq_app/pkg/pkg.cpp): list, files, install a package from
                   a file (--consume), remove, backup; sqterm's own, built from
                   this repository (no download)
@@ -131,7 +140,20 @@ installs `bin/clang.cfg` and `bin/clang++.cfg`, so plain `clang` uses it.
 libc++ 23, static, with libc++'s module sources (`import std`), built from
 the same LLVM sources against the sysroot by a clang 23 for the build
 machine (apt.llvm.org's on CI). With llvm and sysroot, clang in sqterm
-compiles, links and runs C and C++ programs, modules included.
+compiles, links and runs C and C++ programs, modules included. Also one
+shared library, `libc++_shared.so` (linked in `lib/` too), for a program and
+the shared libraries it loads: plain `clang++` still links libc++ in
+statically, and `-nostdlib++ -lc++_shared` asks for the shared one.
+
+**llvm-tools** (`bundled=no`): clangd, clang-tidy and clang-doc, static
+binaries, built as llvm is.
+
+**lldb** (`bundled=no`): lldb, lldb-server, lldb-dap (for an editor) and
+lldb-argdumper, front ends to `liblldb.so`; all of them use the runtimes'
+`libc++_shared.so`, found through a RUNPATH of `$PREFIX/lib`, so install runtimes
+first. Built as runtimes are (clang 23 for the build machine, the sysroot,
+no NDK), with CMake told the system is Android. No Python or Lua scripting,
+line editing or curses GUI yet: each is a library to build first.
 
 ## The manifest, and pkg
 

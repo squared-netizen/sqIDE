@@ -2,6 +2,8 @@
 pkg
 ncurses
 zsh
+zsh-autosuggestions
+zsh-syntax-highlighting
 bash
 coreutils
 sed
@@ -12,3 +14,4 @@ llvm
 sysroot
 runtimes
 llvm-tools
+lldb
