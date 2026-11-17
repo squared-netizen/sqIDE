@@ -81,8 +81,8 @@ recipe_build() {
   "$clang" "${cflags[@]}" -c "$b/crtend.S" -o "$lib/crtend_android.o"
   "$clang" "${cflags[@]}" -c "$b/crtend_so.S" -o "$lib/crtend_so.o"
 
+  # clang's default configuration (clang 16 and later read <driver>.cfg
   # beside the binary).
-  # beside the binary; <CFG> is that folder).
   mkdir -p "$dest$SQ_PREFIX/bin"
   # -D__BIONIC_CTYPE_INLINE=inline: bionic's <ctype.h> makes isalpha and
   # the rest `static inline` otherwise, which `import std` cannot export
