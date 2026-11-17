@@ -124,6 +124,9 @@ write_index() {
         base=$(basename "$archive")
         version=${base#"$name"-}
         version=${version%.tar.zst}
+        # zsh-*.tar.zst also matches zsh-autosuggestions-0.7.1.tar.zst: a
+        # version starts with a digit, another package's name does not.
+        case $version in [0-9]*) ;; *) continue ;; esac
         printf '%s %s %s %s\n' "$name" "$version" "$base" "$(sha256sum "$archive" | cut -c 1-16)"
       done
     done
