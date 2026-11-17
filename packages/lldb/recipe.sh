@@ -86,7 +86,7 @@ recipe_build() {
   # 2. lldb for Android, against the sysroot and libc++_shared.so.
   local cflags="-fPIC -resource-dir=$rd"
   local cxxflags="$cflags -nostdinc++ -isystem $rt/include/$triple/c++/v1 -isystem $rt/include/c++/v1"
-  local ldflags="-fuse-ld=lld -resource-dir=$rd -nostdlib++ -L$rt/lib/$triple -Wl,-z,max-page-size=16384"
+  local ldflags="-fuse-ld=lld -rtlib=compiler-rt -unwindlib=libunwind -resource-dir=$rd -nostdlib++ -L$rt/lib/$triple -Wl,-z,max-page-size=16384"
   env -u CFLAGS -u CXXFLAGS -u LDFLAGS -u CPPFLAGS \
     cmake -S llvm -B ../android "${common[@]}" -DCMAKE_BUILD_TYPE=MinSizeRel \
       -DCMAKE_SYSTEM_NAME=Android -DCMAKE_SYSTEM_VERSION=1 -DCMAKE_SYSTEM_PROCESSOR=aarch64 \

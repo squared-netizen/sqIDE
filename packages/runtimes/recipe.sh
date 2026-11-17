@@ -32,7 +32,8 @@
 # bionic has not (pthread, rt, atomic: in libc, or none), and the objects
 # would ask for them: they are told there are none. The same checks would
 # find libgcc, for libc++_shared.so: they are told the runtime library is
-# compiler-rt's, which skips them. The recipe ends by
+# compiler-rt's, which skips them, and the link is given -rtlib=compiler-rt
+# (apt.llvm.org's clang adds -lgcc itself otherwise: CI, 2026-11-17). The recipe ends by
 # linking a C++ program and an `import std` one.
 
 version=23.1.5
@@ -92,7 +93,7 @@ recipe_build() {
       -DLLVM_DEFAULT_TARGET_TRIPLE="$triple" \
       -DLIBUNWIND_ENABLE_SHARED=OFF -DLIBCXXABI_ENABLE_SHARED=OFF \
       -DLIBCXX_ENABLE_SHARED=ON -DLIBCXX_SHARED_OUTPUT_NAME=c++_shared \
-      -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld -resource-dir=$rd -Wl,-z,max-page-size=16384" \
+      -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld -rtlib=compiler-rt -resource-dir=$rd -Wl,-z,max-page-size=16384" \
       -DLIBCXXABI_USE_LLVM_UNWINDER=ON -DLIBCXXABI_ENABLE_STATIC_UNWINDER=ON \
       -DLIBCXX_ENABLE_STATIC_ABI_LIBRARY=ON -DLIBCXX_INSTALL_MODULES=ON \
       -DLIBCXX_INCLUDE_TESTS=OFF -DLIBCXXABI_INCLUDE_TESTS=OFF -DLIBUNWIND_INCLUDE_TESTS=OFF \
