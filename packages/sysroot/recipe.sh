@@ -88,7 +88,10 @@ recipe_build() {
   # the rest `static inline` otherwise, which `import std` cannot export
   # (libc++'s std module re-exports them); inline, they are the ones libc
   # exports. squared's own Android build passes the same.
-  printf '%s\n' '--sysroot=<CFG>/../share/sysroot' '-D__BIONIC_CTYPE_INLINE=inline' \
+  # `--sysroot <CFG>/...`, two words: clang expands <CFG> only where an
+  # argument starts with it, and passed `--sysroot=<CFG>/...` on as it was
+  # (the phone, 2026-11-17: stdio.h not found).
+  printf '%s\n' '--sysroot <CFG>/../share/sysroot' '-D__BIONIC_CTYPE_INLINE=inline' \
     > "$dest$SQ_PREFIX/bin/clang.cfg"
   cp "$dest$SQ_PREFIX/bin/clang.cfg" "$dest$SQ_PREFIX/bin/clang++.cfg"
 
