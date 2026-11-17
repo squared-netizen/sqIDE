@@ -50,3 +50,71 @@ zstyle ':completion:*' menu select
 
 # A short prompt: the directory (the home as ~), then % (# for root).
 PROMPT='%F{green}%~%f %# '
+
+# The rest is what fish does out of the box. SQTERM_PLAIN=1 in ~/.zshenv
+# stops here: the plain shell above.
+[[ -n $SQTERM_PLAIN ]] && return
+
+# Moving around: a folder's name alone changes to it; cd keeps a stack of
+# where it has been (cd -<Tab> lists it).
+setopt auto_cd auto_pushd pushd_ignore_dups pushd_silent
+
+# Colours for files by their kind: ls, grep, and the completion menu.
+if (( $+commands[dircolors] )); then eval "$(dircolors -b)"; fi
+alias ls='ls --color=auto' ll='ls -lh' la='ls -A'
+alias grep='grep --color=auto'
+
+# Completion: case does not matter (unless typed in capitals), a part of a
+# name is enough (f.b for foo.bar, then any piece of the name), matches in
+# groups under a heading, coloured as ls colours them, and remembered
+# between sessions where working them out is slow.
+zmodload zsh/complist 2>/dev/null
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}' 'r:|[._-]=* r:|=*' 'l:|=* r:|=*'
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+zstyle ':completion:*' group-name ''
+zstyle ':completion:*:descriptions' format '%F{yellow}%d%f'
+zstyle ':completion:*:warnings' format '%F{red}no match%f'
+zstyle ':completion:*' use-cache on
+zstyle ':completion:*' cache-path "$HOME/.zcompcache"
+setopt complete_in_word always_to_end
+
+# Up and Down search the history for lines that start with what is typed.
+autoload -Uz up-line-or-beginning-search down-line-or-beginning-search
+zle -N up-line-or-beginning-search
+zle -N down-line-or-beginning-search
+for _sqterm_key in "${terminfo[kcuu1]}" '^[[A' '^[OA'; do
+  [[ -n $_sqterm_key ]] && bindkey -- "$_sqterm_key" up-line-or-beginning-search
+done
+for _sqterm_key in "${terminfo[kcud1]}" '^[[B' '^[OB'; do
+  [[ -n $_sqterm_key ]] && bindkey -- "$_sqterm_key" down-line-or-beginning-search
+done
+unset _sqterm_key
+
+# The prompt: the last command's status when it failed, the directory, and
+# inside a git repository its branch (when git is installed).
+setopt prompt_subst
+if (( $+commands[git] )); then
+  autoload -Uz vcs_info add-zsh-hook
+  zstyle ':vcs_info:*' enable git
+  zstyle ':vcs_info:git:*' formats ' %F{magenta}%b%f'
+  zstyle ':vcs_info:git:*' actionformats ' %F{magenta}%b%f %F{red}%a%f'
+  add-zsh-hook precmd vcs_info
+fi
+PROMPT='%(?..%F{red}[%?]%f )%F{green}%~%f${vcs_info_msg_0_} %# '
+
+# The two plugins, each a package of its own, used when installed. The rest
+# of a line offered in grey as it is typed (the right arrow or End takes
+# it), from the history, then from completion.
+_sqterm_plugins=${PREFIX:-/data/data/dev.squared.sqterm/files/usr}/share/zsh/plugins
+if [[ -r $_sqterm_plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ]]; then
+  ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+  ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=200
+  source $_sqterm_plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
+fi
+# The line coloured as it is typed: a command that does not exist in red.
+# Sourced last, as it asks: it wraps the widgets defined before it.
+if [[ -r $_sqterm_plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]]; then
+  ZSH_HIGHLIGHT_HIGHLIGHTERS=(main brackets)
+  source $_sqterm_plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+fi
+unset _sqterm_plugins

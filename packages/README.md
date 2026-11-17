@@ -21,7 +21,16 @@ build.sh          checks the sources, builds and packs every recipe, writes the
 sources.lock      sha256s of the sources that publish none, from their first download
 ncurses/recipe.sh ncurses 6.6: the terminal database (sqterm's entry in it), tic, tput
 zsh/recipe.sh     zsh 5.9.2: the shell, static, its modules linked in
-zsh/zshrc         $PREFIX/etc/zshrc: keys, history, completion, a prompt
+zsh/zshrc         $PREFIX/etc/zshrc: keys, history, completion, a prompt; then
+                  what fish does out of the box (colours for files, completion
+                  that ignores case and takes part of a name, Up and Down
+                  searching the history by what is typed, a prompt with the
+                  failed status and the git branch) and the two plugins below
+                  when installed. SQTERM_PLAIN=1 in ~/.zshenv: none of that
+zsh-autosuggestions/, zsh-syntax-highlighting/
+                  zsh scripts (0.7.1, MIT; 0.8.0, BSD), git sources: the rest
+                  of a line offered in grey as it is typed, and the line
+                  coloured (a command that does not exist in red)
 pkg/recipe.sh     pkg (sq_app/pkg/pkg.cpp): list, files, install a package from
                   a file (--consume), remove, backup; sqterm's own, built from
                   this repository (no download)
