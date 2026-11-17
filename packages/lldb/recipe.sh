@@ -47,6 +47,21 @@ keep="bin lib/liblldb.so share/licenses/lldb"
 
 components="lldb;liblldb;lldb-server;lldb-dap;lldb-argdumper"
 
+recipe_patch() {
+  # Before it starts a program to debug, lldb-server's child calls
+  # setgid(getgid()); Android's seccomp filter for apps kills a process that
+  # calls setgid, so the child died before exec and lldb said "could not
+  # sync with inferior process" (2026-11-17, on the phone). An app has no
+  # setgid powers to drop. Termux's lldb carries the same change.
+  local f=lldb/source/Host/posix/ProcessLauncherPosixFork.cpp
+  sed -i '/^    if (setgid(getgid()) != 0)$/{i\
+#if !defined(__ANDROID__)
+n;a\
+#endif
+}' "$f"
+  grep -A3 '^#if !defined(__ANDROID__)$' "$f" | grep -q '^#endif$'
+}
+
 recipe_build() {
   local bin=${LLVM_BIN:-/usr/lib/llvm-23/bin}
   [ -x "$bin/clang" ] || { echo "no clang 23 at $bin (set LLVM_BIN)" >&2; return 1; }
