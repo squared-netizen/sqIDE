@@ -4,10 +4,9 @@
 #
 # Each is a static binary (LLVM's driver build takes none of them), built
 # with the NDK's CMake toolchain as llvm is, the C++ library linked in.
-# lldb is not here yet: its core is a shared library, liblldb.so, and a
-# program and its shared library need one shared C++ library between them,
-# not a static copy each. That waits for a shared libc++ of our own in the
-# runtimes package (not the NDK's).
+# lldb is a package of its own: its core is a shared library, liblldb.so,
+# and a program and its shared library need one shared C++ library between
+# them, not a static copy each (the runtimes' libc++_shared.so).
 #
 # Large: not in the APK (bundled=no). tools/fetch_packages.sh --get
 # llvm-tools; in sqterm, pkg install it --consume.

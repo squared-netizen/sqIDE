@@ -131,7 +131,20 @@ installs `bin/clang.cfg` and `bin/clang++.cfg`, so plain `clang` uses it.
 libc++ 23, static, with libc++'s module sources (`import std`), built from
 the same LLVM sources against the sysroot by a clang 23 for the build
 machine (apt.llvm.org's on CI). With llvm and sysroot, clang in sqterm
-compiles, links and runs C and C++ programs, modules included.
+compiles, links and runs C and C++ programs, modules included. Also one
+shared library, `libc++_shared.so` (linked in `lib/` too), for a program and
+the shared libraries it loads: plain `clang++` still links libc++ in
+statically, and `-nostdlib++ -lc++_shared` asks for the shared one.
+
+**llvm-tools** (`bundled=no`): clangd, clang-tidy and clang-doc, static
+binaries, built as llvm is.
+
+**lldb** (`bundled=no`): lldb, lldb-server, lldb-dap (for an editor) and
+lldb-argdumper, front ends to `liblldb.so`; all of them use the runtimes'
+`libc++_shared.so`, found through `$ORIGIN/../lib`, so install runtimes
+first. Built as runtimes are (clang 23 for the build machine, the sysroot,
+no NDK), with CMake told the system is Android. No Python or Lua scripting,
+line editing or curses GUI yet: each is a library to build first.
 
 ## The manifest, and pkg
 
