@@ -10,7 +10,7 @@
 #                                         versions: the real ones are the
 #                                         device's), and the crt objects
 # bin/clang.cfg, bin/clang++.cfg          clang's default configuration:
-#                                         --sysroot=<the above>, so plain
+#                                         --sysroot=<the above, absolute>, so plain
 #                                         `clang hello.c` finds it
 #
 # The stubs come from bionic's symbol lists (libc.map.txt and the others)
@@ -82,16 +82,17 @@ recipe_build() {
   "$clang" "${cflags[@]}" -c "$b/crtend_so.S" -o "$lib/crtend_so.o"
 
   # clang's default configuration (clang 16 and later read <driver>.cfg
-  # beside the binary; <CFG> is that folder).
+  # beside the binary).
   mkdir -p "$dest$SQ_PREFIX/bin"
   # -D__BIONIC_CTYPE_INLINE=inline: bionic's <ctype.h> makes isalpha and
   # the rest `static inline` otherwise, which `import std` cannot export
   # (libc++'s std module re-exports them); inline, they are the ones libc
   # exports. squared's own Android build passes the same.
-  # `--sysroot <CFG>/...`, two words: clang expands <CFG> only where an
-  # argument starts with it, and passed `--sysroot=<CFG>/...` on as it was
-  # (the phone, 2026-11-17: stdio.h not found).
-  printf '%s\n' '--sysroot <CFG>/../share/sysroot' '-D__BIONIC_CTYPE_INLINE=inline' \
+  # The sysroot by its absolute path: every package is built for this one
+  # prefix. Not <CFG> (the config file's folder): clang 23.1.5 on the phone
+  # passed it on unexpanded, in either spelling (2026-11-17: stdio.h not
+  # found, `-isysroot <CFG>/../share/sysroot`).
+  printf '%s\n' "--sysroot=$SQ_PREFIX/share/sysroot" '-D__BIONIC_CTYPE_INLINE=inline' \
     > "$dest$SQ_PREFIX/bin/clang.cfg"
   cp "$dest$SQ_PREFIX/bin/clang.cfg" "$dest$SQ_PREFIX/bin/clang++.cfg"
 
