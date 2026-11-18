@@ -17,13 +17,27 @@ on:
   push:
     branches: [main]
     paths:
+      # Every file a package's key covers: the recipes, and each recipe's
+      # `inputs` outside packages/ (pkg's sources, ncurses' terminfo entry).
+      # A key that changes with no run here leaves the release without the
+      # archive fetch_packages.sh asks for.
       - packages/**
       - terminfo/sqterm.ti
+      - sq_app/pkg/**
+      - sq_app/src/unpack.cpp
+      - sq_app/src/unpack.hpp
+      - sq_app/third_party/zstd/**
+      - squared/third_party/yyjson/**
       - .github/workflows/packages.yml
   pull_request:
-    paths:
+    paths:  # the same list as push
       - packages/**
       - terminfo/sqterm.ti
+      - sq_app/pkg/**
+      - sq_app/src/unpack.cpp
+      - sq_app/src/unpack.hpp
+      - sq_app/third_party/zstd/**
+      - squared/third_party/yyjson/**
       - .github/workflows/packages.yml
   workflow_dispatch:
 
