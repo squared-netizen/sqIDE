@@ -157,8 +157,9 @@ run's log, the system log), several at once (`dump sys crash`), `dump all`;
 for it, and wakes every 16 ms while a dump runs with the app in the
 background.
 The secret is in the APK, which other apps can read, so this keeps out apps
-that are not looking for it, no more: dev builds only. A Console build
-carries the `INTERNET` permission, as a `DEV_LOG` build does.
+that are not looking for it, no more: dev builds only. Its socket needs the
+`INTERNET` permission, which sqterm's manifest carries for every build
+(pkg's downloads).
 
 **The last run's log.** The newest 200 lines are saved to `files/log.txt`
 when the app leaves the screen and when it ends; the next launch moves them

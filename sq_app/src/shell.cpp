@@ -99,7 +99,13 @@ void Shell::spawn(sq::messaging::Telegraph& t) {
     // The environment the shell starts with; $PREFIX/etc/zshrc and the
     // user's ~/.zshrc add the rest.
     const std::string bin = places_.prefix.empty() ? std::string() : places_.prefix + "/bin:";
-    const std::array<std::string, 11> text{
+    // Android's trust store, for curl (pkg's downloads) and what else
+    // speaks TLS: the one Google Play updates (Android 14 and later) where it
+    // is there, else the system's.
+    const char* certificates = ::access("/apex/com.android.conscrypt/cacerts", R_OK) == 0
+                                   ? "/apex/com.android.conscrypt/cacerts"
+                                   : "/system/etc/security/cacerts";
+    const std::array<std::string, 12> text{
         "TERM=sqterm",
         "COLORTERM=truecolor",
         "LANG=en_US.UTF-8",
@@ -112,6 +118,7 @@ void Shell::spawn(sq::messaging::Telegraph& t) {
         // What Android's own tools (am, pm) look for, as an app's process has them.
         "ANDROID_DATA=/data",
         "ANDROID_ROOT=/system",
+        std::string("SSL_CERT_DIR=") + certificates,
     };
     environment_text_ = text;
     environment_count_ = 0;
