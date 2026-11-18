@@ -9,11 +9,15 @@
 #   tools/fetch_packages.sh --sources [name...]  the recipes' sources, into
 #                                              build/packages/sources/, to
 #                                              build here: then make packages
-#   tools/fetch_packages.sh --get NAME [DIR]   a large package (not in the APK),
-#                                              into DIR (default
-#                                              ~/storage/downloads, Termux's
-#                                              link to Download): then in
-#                                              sqterm, pkg install it --consume
+#   tools/fetch_packages.sh --get NAME...      packages, and what each needs at
+#                                              run time (packages/needs), into
+#                                              sqterm's packages folder
+#                                              (SQ_PKG_DIR, default
+#                                              ~/storage/shared/sqterm/packages,
+#                                              /sdcard/sqterm/packages), with
+#                                              an index pkg reads: then in
+#                                              sqterm, pkg install NAME, or
+#                                              pkg upgrade, offline
 #   tools/fetch_packages.sh --dry-run [...]    say what it would download
 #
 # The packages: CI (.github/workflows/packages.yml) builds each package once
@@ -62,17 +66,15 @@ while [ $# -gt 0 ]; do
     --sources) MODE=sources ;;
     --get) MODE=get ;;
     --dry-run) DRY=1 ;;
-    -h | --help) sed -n '2,34p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,38p' "$0"; exit 0 ;;
     -*) fail "unknown option: $1 (see --help)" ;;
-    *) # After --get NAME, a second word is the folder.
-       if [ "$MODE" = get ] && [ ${#names[@]} -eq 1 ]; then names+=("$1"); shift; continue; fi
-       [ -f "$RECIPES/$1/recipe.sh" ] || fail "no recipe: packages/$1/recipe.sh"
+    *) [ -f "$RECIPES/$1/recipe.sh" ] || fail "no recipe: packages/$1/recipe.sh"
        names+=("$1") ;;
   esac
   shift
 done
 if [ "$MODE" = get ]; then
-  [ ${#names[@]} -ge 1 ] && [ ${#names[@]} -le 2 ] || fail "--get NAME [DIR]"
+  [ ${#names[@]} -ge 1 ] || fail "--get NAME..."
 elif [ ${#names[@]} -gt 0 ] && [ "$MODE" != sources ]; then
   fail "naming a package fetches its source: --sources ${names[*]}"
 fi
@@ -116,28 +118,78 @@ fetch_release() {
   say packages "${#wanted[@]} in ${OUT#"$ROOT"/}, checked"
 }
 
-# A large package (bundled=no, not in the APK), downloaded into DIR for pkg
-# to install: in sqterm, pkg install DIR/<file> --consume.
-fetch_one() {
-  local want=$1 dir=$2 name version key bundled base=$SQ_PACKAGES_URL/packages asset
-  while read -r name version key bundled; do
-    [ "$name" = "$want" ] || continue
-    asset=$name-$version-$key.tar.zst
-    say release "packages ($SQ_PACKAGES_URL)"
-    if [ "$DRY" = 1 ]; then say would "$asset into $dir"; return; fi
-    mkdir -p "$dir"
-    say download "$asset"
-    get "$dir/$asset.part" "$base/$asset" && get "$dir/$asset.sha256" "$base/$asset.sha256" || {
-      rm -f "$dir/$asset.part" "$dir/$asset.sha256"
-      fail "no $asset in the release: CI builds it when its recipe reaches main"; }
-    mv "$dir/$asset.part" "$dir/$asset"
-    ( cd "$dir" && sha256sum -c --quiet "$asset.sha256" ) || fail "$asset does not match its .sha256"
-    rm -f "$dir/$asset.sha256"
-    say checked "$dir/$asset"
-    say next "in sqterm: pkg install $name --consume (pkg finds the file in Download)"
+# What a package needs at run time (packages/needs), comma-separated, or -.
+needs_of() {
+  local n
+  n=$(awk -v n="$1:" '$1 == n { $1 = ""; sub(/^ +/, ""); gsub(/ +/, ","); print }' "$RECIPES/needs" 2>/dev/null)
+  echo "${n:--}"
+}
+
+# Packages, and what they need, into sqterm's packages folder, each checked
+# against its .sha256, and the folder's index (pkg's: "sqterm release index
+# 2", a line a package) brought up to date for them: in sqterm, pkg install
+# NAME and pkg upgrade find them there, offline, by name.
+fetch_get() {
+  local dir=${SQ_PKG_DIR:-$HOME/storage/shared/sqterm/packages} base=$SQ_PACKAGES_URL/packages
+  local name version key bundled asset sha line
+  local -A keys=() want=()
+  while read -r name version key bundled; do keys[$name]="$version $key $bundled"; done \
+    < <(bash "$RECIPES/build.sh" --keys)
+  # The names asked for, and what they need, and what that needs.
+  local -a todo=("${names[@]}") order=()
+  while [ ${#todo[@]} -gt 0 ]; do
+    name=${todo[0]}; todo=("${todo[@]:1}")
+    [ -n "${want[$name]:-}" ] && continue
+    want[$name]=1
+    order+=("$name")
+    line=$(needs_of "$name")
+    [ "$line" = - ] || todo+=(${line//,/ })
+  done
+  say release "packages ($SQ_PACKAGES_URL)"
+  if [ "$DRY" = 1 ]; then
+    for name in "${order[@]}"; do read -r version key _ <<< "${keys[$name]}"; say would "$name-$version-$key.tar.zst into $dir"; done
     return
-  done < <(bash "$RECIPES/build.sh" --keys)
-  fail "no recipe: packages/$want"
+  fi
+  mkdir -p "$dir" || fail "cannot make $dir (Termux: termux-setup-storage, once)"
+  local lines=
+  for name in "${order[@]}"; do
+    read -r version key bundled <<< "${keys[$name]}"
+    asset=$name-$version-$key.tar.zst
+    if [ -f "$dir/$asset" ] && [ -f "$dir/$asset.sha256" ] &&
+       ( cd "$dir" && sha256sum -c --quiet "$asset.sha256" ) 2>/dev/null; then
+      say have "$asset"
+    else
+      say download "$asset"
+      get "$dir/$asset.part" "$base/$asset" && get "$dir/$asset.sha256" "$base/$asset.sha256" || {
+        rm -f "$dir/$asset.part" "$dir/$asset.sha256"
+        fail "no $asset in the release: CI builds it when its recipe reaches main"; }
+      mv "$dir/$asset.part" "$dir/$asset"
+      ( cd "$dir" && sha256sum -c --quiet "$asset.sha256" ) || fail "$asset does not match its .sha256"
+      say checked "$asset"
+    fi
+    sha=$(cut -d ' ' -f 1 "$dir/$asset.sha256")
+    lines+="$name $version $key $bundled $sha $(needs_of "$name")"$'\n'
+    # Older archives of it go: the index names this one.
+    for old in "$dir/$name"-[0-9]*.tar.zst; do
+      [ -e "$old" ] && [ "$old" != "$dir/$asset" ] && rm -f "$old" "$old.sha256"
+    done
+  done
+  # The folder's index: these lines, then the others it had.
+  {
+    echo "sqterm release index 2"
+    printf '%s' "$lines"
+    if [ -f "$dir/index" ]; then
+      # An index of version 1 has no needs: "-" for each.
+      local v1=
+      [ "$(head -n 1 "$dir/index")" = "sqterm release index 1" ] && v1=" -"
+      tail -n +2 "$dir/index" | while read -r name rest; do
+        if [ -n "$name" ] && [ -z "${want[$name]:-}" ]; then echo "$name $rest$v1"; fi
+      done
+    fi
+  } > "$dir/index.new"
+  mv "$dir/index.new" "$dir/index"
+  say index "$dir/index"
+  say next "in sqterm: pkg install ${names[*]} (or pkg upgrade), offline"
 }
 
 # A git source (a recipe's git= and tag=): a shallow clone at the tag, in
@@ -215,7 +267,7 @@ fetch_source() {
 if [ "$MODE" = release ]; then
   fetch_release
 elif [ "$MODE" = get ]; then
-  fetch_one "${names[0]}" "${names[1]:-${HOME}/storage/downloads}"
+  fetch_get
 else
   [ ${#names[@]} -gt 0 ] || read -r -a names <<< "$(bash "$RECIPES/build.sh" --list | awk '{ printf "%s ", $1 }')"
   for name in "${names[@]}"; do fetch_source "$name"; done

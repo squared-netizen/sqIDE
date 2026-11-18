@@ -215,8 +215,9 @@ jobs:
           gh release upload "$RELEASE" dist/*
 
       # What pkg reads (pkg update, upgrade, install NAME): for each package
-      # main's recipes ask for, its version, key, whether the APK carries it
-      # and its archive's sha256, in build order. Written on every run on
+      # main's recipes ask for, its version, key, whether the APK carries it,
+      # its archive's sha256 and what it needs at run time (packages/needs),
+      # in build order. Written on every run on
       # main, also when nothing was built: a recipe changed back to an
       # earlier key needs no build, only this. Replaced in place (--clobber);
       # tools/prune_release.sh keeps it.
@@ -225,7 +226,7 @@ jobs:
         run: |
           mkdir -p shas
           {
-            echo "sqterm release index 1"
+            echo "sqterm release index 2"
             while read -r name version key bundled; do
               asset=$name-$version-$key.tar.zst
               if [ -f "dist/$asset.sha256" ]; then
@@ -235,7 +236,8 @@ jobs:
               fi
               sha=$(cut -d ' ' -f 1 "shas/$asset.sha256")
               [ ${#sha} -eq 64 ] || { echo "no sha256 for $asset" >&2; exit 1; }
-              echo "$name $version $key $bundled $sha"
+              needs=$(awk -v n="$name:" '$1 == n { $1 = ""; sub(/^ +/, ""); gsub(/ +/, ","); print }' packages/needs)
+              echo "$name $version $key $bundled $sha ${needs:--}"
             done < keys.txt
           } > index
           cat index

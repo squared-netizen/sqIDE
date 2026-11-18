@@ -127,11 +127,11 @@ pkg, so it is never stored twice:
 pkg install llvm                            # in sqterm: from the release (below)
 ```
 
-or, without the network in sqterm, through Termux and Download:
+or, without the network in sqterm, through Termux and the packages folder:
 
 ```sh
-tools/fetch_packages.sh --get llvm          # Termux: into ~/storage/downloads
-pkg install llvm --consume                  # in sqterm: that file, then deleted
+tools/fetch_packages.sh --get llvm          # Termux: llvm, and what it needs, into /sdcard/sqterm/packages
+pkg install llvm                            # in sqterm: found there by name, offline
 ```
 
 llvm is built on CI only (hours on a phone): CMake and Ninja, the NDK's CMake
@@ -185,35 +185,60 @@ over each other's.
 `pkg` reads those records:
 
 ```sh
-pkg list                          # installed: name, version, key (and the release's, if it differs)
+pkg list                          # installed: name, version, key (and the index's, if it differs)
 pkg files zsh                     # what zsh installed
-pkg update                        # the release's index: what it has, what differs here
-pkg upgrade                       # every installed package whose key differs from the release's
+pkg update                        # settle the index: what there is, what differs here
+pkg upgrade                       # every installed package whose key differs, and missing needs
 pkg upgrade runtimes lldb         # or only those
-pkg search llvm                   # the release's packages, and which are installed
-pkg install lldb                  # by name: from the release
-pkg install ./zsh-5.9.2.tar       # or a file
-pkg remove make
+pkg search llvm                   # what there is, what it needs, which are installed
+pkg install lldb                  # by name: runtimes first (lldb needs it), then lldb
+pkg install ./zsh-5.9.2.tar       # or a file (what it needs, too, if an index knows it)
+pkg remove runtimes               # refused while lldb is installed (--force to insist)
 pkg backup zsh /sdcard/Download   # zsh-5.9.2.tar: its files as a package again
+pkg clean                         # empty the internal archive
 ```
 
-**From the release.** CI publishes, beside the archives, an `index`:
-`sqterm release index 1`, then a line a package, `name version key bundled
-sha256`, for what main's recipes ask for, in build order (rewritten on every
-run on main). `pkg update`, `upgrade` and `install NAME` download it with
-curl, keep it in `$PREFIX/var/lib/sqterm/release-index`, download the
-archives they need into `$PREFIX/var/cache/sqterm/pkg/`, check each against
-the index's sha256, install it and delete the download. A package is
-compared by key, not by version: two builds of `runtimes 23.1.5` are two
-keys (2026-11-18: an old runtimes without `libc++_shared.so` read as up to
-date). Without the network, `pkg install NAME` falls back to the newest
-archive of it in Download, and uses the one there without downloading when
-it is the very archive the index names. `SQ_PACKAGES_URL` points pkg at a
+**Names, not file names.** Every package is installed, upgraded and removed
+by its name. The keys and sha256s in archive names are pkg's to match, never
+anyone's to type.
+
+**The index.** CI publishes, beside the archives, an `index`: `sqterm
+release index 2`, then a line a package, `name version key bundled sha256
+needs`, for what main's recipes ask for, in build order (rewritten on every
+run on main). `needs` is what the package needs at run time, from
+[`needs`](needs) (comma-separated, or `-`). `tools/fetch_packages.sh --get`
+writes an index of the same form into the packages folder for what it
+fetched. `pkg update` (and upgrade, install NAME and search, which start
+with it) settles one: the release's, through curl, with what only the
+packages folder's index names after it; offline, the packages folder's (or
+the last one settled on, whichever is newer). It keeps it in
+`$PREFIX/var/lib/sqterm/release-index`. pkg also reads index version 1
+(no needs).
+
+**Where the archives are.** For each package it installs, pkg looks for
+that very archive (by its name, checked against the index's sha256) in:
+
+| Folder | What it is |
+|---|---|
+| `$PREFIX/var/cache/sqterm/archive` | the internal archive: what pkg downloaded, kept, one archive a package (`pkg clean` empties it) |
+| `/sdcard/sqterm/packages` (`$PKG_DIR`) | the packages folder: Termux writes it (`fetch_packages.sh --get`), and it survives the app |
+| `/sdcard/Download` | a browser's |
+
+and only then downloads it from the release, into the internal archive. So
+`update` and `upgrade` work offline from the packages folder, a package
+reinstalled needs no network, and nothing is downloaded twice. A name no
+index knows is installed from the newest archive of it in the packages
+folder, then Download, unchecked.
+
+A package is compared by key, not by version: two builds of `runtimes
+23.1.5` are two keys (2026-11-18: an old runtimes without
+`libc++_shared.so` read as up to date). `SQ_PACKAGES_URL` points pkg at a
 mirror (`<url>/packages/<file>`), as it does fetch_packages.sh.
 
-The sha256s guard against a broken download, and HTTPS the way there; they
-are not signatures. Packages the APK carries and pkg has upgraded are put
-back to the APK's own when an update of the app brings a different set.
+The sha256s guard against a broken or mixed-up file, and HTTPS the way
+there; they are not signatures. Packages the APK carries and pkg has
+upgraded are put back to the APK's own when an update of the app brings a
+different set.
 
 An upgrade (`pkg install` of a newer version) deletes the files the old
 version had and the new one has not, and the folders left empty. `--consume`
