@@ -196,7 +196,18 @@ pkg install ./zsh-5.9.2.tar       # or a file (what it needs, too, if an index k
 pkg remove runtimes               # refused while lldb is installed (--force to insist)
 pkg backup zsh /sdcard/Download   # zsh-5.9.2.tar: its files as a package again
 pkg clean                         # empty the internal archive
+pkg info lldb                     # version, key, size, licence, needs, needed by, where its archive is
+pkg owns clang                    # which package installed bin/clang (or any path in the prefix)
+pkg install lldb --from sqterm    # one source only: archive, sqterm (the packages folder) or repo
+pkg upgrade --from repo           # the release's index and fresh downloads, whatever is here
 ```
+
+**One source: `--from`.** `install`, `upgrade`, `update` and `search` look
+everywhere in turn unless told otherwise. `--from archive` uses only the
+internal archive and the index last settled on, `--from sqterm` only the
+packages folder and its index (neither touches the network), and `--from
+repo` only the release, downloading every archive afresh. Only a plain or
+`--from repo` run keeps the index it settles on.
 
 **Names, not file names.** Every package is installed, upgraded and removed
 by its name. The keys and sha256s in archive names are pkg's to match, never
