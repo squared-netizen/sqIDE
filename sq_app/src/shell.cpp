@@ -73,8 +73,8 @@ void Shell::install(sq::messaging::Telegraph& t) {
             package.archive, places_.prefix,
             std::string_view(package.name).substr(0, package.name.find(' ')));
         if (!error.empty()) {
-            n = std::snprintf(line.data(), line.size(), "[sqterm: %.100s]\r\n", error.c_str());
-            say({line.data(), static_cast<std::size_t>(n > 0 ? n : 0)});
+            // The whole message: a path cut at 100 characters misled (2026-11-17).
+            say("[sqterm: " + error + "]\r\n");
             all = false;
             break;
         }
