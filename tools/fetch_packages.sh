@@ -134,7 +134,7 @@ fetch_one() {
     ( cd "$dir" && sha256sum -c --quiet "$asset.sha256" ) || fail "$asset does not match its .sha256"
     rm -f "$dir/$asset.sha256"
     say checked "$dir/$asset"
-    say next "in sqterm: pkg install <that file> --consume"
+    say next "in sqterm: pkg install $name --consume (pkg finds the file in Download)"
     return
   done < <(bash "$RECIPES/build.sh" --keys)
   fail "no recipe: packages/$want"
