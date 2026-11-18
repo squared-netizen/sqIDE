@@ -31,6 +31,16 @@ recipe_patch() {
   # A script with no #! line runs under /bin/sh, which Android does not have.
   sed -i 's|execve("/bin/sh", |execve("/system/bin/sh", |' Src/exec.c
   grep -q 'execve("/system/bin/sh", ' Src/exec.c
+  # A script whose #! names /bin/sh, /usr/bin/env or /bin/bash: Android has
+  # none of them, and zsh only searched PATH for an interpreter named
+  # without a path. Now a missing one is found by its name on PATH
+  # (packages/zsh/interpreter.c), found in sqterm's prefix or /system/bin.
+  sed -i "s|^#include \"exec.pro\"$|&\n#include \"$ROOT/packages/zsh/interpreter.c\"|" Src/exec.c
+  sed -i "s|^\t\t\t    if (\*ptr2 != '/' \&\&$|\t\t\t    if (1 \&\&|" Src/exec.c
+  sed -i "s|^\t\t\t\t(pprog = pathprog(ptr2, NULL))) {$|\t\t\t\t(pprog = sqterm_interpreter(ptr2))) {|" Src/exec.c
+  grep -q "packages/zsh/interpreter.c" Src/exec.c
+  grep -q "(pprog = sqterm_interpreter(ptr2))) {" Src/exec.c
+  ! grep -q "if (\*ptr2 != '/' &&$" Src/exec.c
   # Setting the line discipline is refused to an app; each try costs a call.
   sed -i 's|^#if defined(TIOCSETD) && defined(NTTYDISC)$|#if defined(TIOCSETD) \&\& defined(NTTYDISC) \&\& !defined(__ANDROID__)|' Src/init.c
 }
