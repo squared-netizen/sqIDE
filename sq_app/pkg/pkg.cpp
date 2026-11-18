@@ -4,7 +4,12 @@
 //
 //   pkg list                         what is installed: name, version, key,
 //                                    and the index's key where it differs
+//   pkg info NAME                    installed or not: version, key, size,
+//                                    licence, the index's, needs, needed by,
+//                                    where its archive already is
 //   pkg files NAME                   the files a package installed
+//   pkg owns PATH|COMMAND            which package installed a file
+//                                    (pkg owns clang: bin/clang)
 //   pkg update                       settle the index: what there is
 //   pkg upgrade [NAME...]            each installed package (or those named)
 //                                    whose key differs from the index's, and
@@ -23,6 +28,13 @@
 //   pkg backup NAME [DIR]            its installed files as a package again,
 //                                    DIR/NAME-VERSION.tar (default: here)
 //   pkg clean                        empty the internal archive
+//
+// --from SOURCE (install, upgrade, update, search) looks in one source
+// only: archive (the internal archive, with the index last settled on),
+// sqterm (the packages folder and its index) or repo (the release: its
+// index, and every archive downloaded afresh). The first two never touch
+// the network. Only a plain or --from repo update keeps the index it
+// settles on, so a look at one folder never makes the next upgrade go back.
 //
 // Names, never file names: a package is installed, upgraded and removed by
 // its name, wherever its archive is, and the keys and sha256s in archive
@@ -102,6 +114,7 @@ struct Manifest {
     std::string id;
     std::string version;
     std::string key;                 ///< consumers.sqterm.key; empty if none
+    std::string license;
     std::vector<std::string> files;  ///< relative to the prefix
 };
 
@@ -180,6 +193,7 @@ std::optional<Manifest> read_manifest(const std::string& file, std::string& erro
     m.id = id;
     m.version = version;
     if (key != nullptr) m.key = key;
+    if (const char* l = yyjson_get_str(yyjson_obj_get(root, "license"))) m.license = l;
     std::size_t index = 0, count = 0;
     yyjson_val* item = nullptr;
     yyjson_arr_foreach(files, index, count, item) {
@@ -280,6 +294,25 @@ std::string packages_dir() {
 }
 /// Where a browser leaves a package downloaded by hand.
 constexpr std::string_view download_dir = "/sdcard/Download";
+
+/// --from: where install, upgrade, update and search may look. `any` (no
+/// --from) is every source in turn; the others, that one alone:
+///   archive  the internal archive, and the index last settled on; no network
+///   sqterm   the packages folder ($PKG_DIR) and its index; no network
+///   repo     the release (sqterm's GitHub repository): its index, and every
+///            archive downloaded afresh, whatever is here
+enum class Source { any, archive, sqterm, repo };
+Source from = Source::any;
+
+std::string_view source_name(Source s) {
+    switch (s) {
+        case Source::archive: return "archive";
+        case Source::sqterm: return "sqterm";
+        case Source::repo: return "repo";
+        case Source::any: break;
+    }
+    return "any";
+}
 
 /// Where the release's files are: <base>/<file>.
 std::string release_base() {
@@ -558,21 +591,38 @@ std::optional<std::vector<Available>> refresh_index(std::string& error, bool qui
         error = errno_text("cannot make", dir);
         return std::nullopt;
     }
+    if (from == Source::archive) {
+        // What the archive's packages were installed by: the index last
+        // settled on.
+        auto last = local_index();
+        if (!last) error = "no index settled on yet (pkg update, once, from the repo or the packages folder)";
+        return last;
+    }
     // The release's.
     std::optional<std::vector<Available>> release;
-    std::string offline;
-    const std::string part = index_path() + ".download";
-    const std::string url = release_base() + "/index";
-    if (const int status = curl_to(url, part, false); status == 0) {
-        release = read_index(part, offline);
-    } else {
-        offline = curl_failed(status, url);
+    std::string offline = "--from sqterm";
+    if (from != Source::sqterm) {
+        const std::string part = index_path() + ".download";
+        const std::string url = release_base() + "/index";
+        if (const int status = curl_to(url, part, false); status == 0) {
+            release = read_index(part, offline);
+        } else {
+            offline = curl_failed(status, url);
+        }
+        ::unlink(part.c_str());
+        if (from == Source::repo && !release) {
+            error = offline;
+            return std::nullopt;
+        }
     }
-    ::unlink(part.c_str());
     // The packages folder's (tools/fetch_packages.sh --get writes it).
     std::optional<std::vector<Available>> folder;
     const std::string folder_index = packages_dir() + "/index";
-    if (::access(folder_index.c_str(), F_OK) == 0) {
+    if (from == Source::sqterm && ::access(folder_index.c_str(), F_OK) != 0) {
+        error = "no " + folder_index + " (in Termux: tools/fetch_packages.sh --get NAME...)";
+        return std::nullopt;
+    }
+    if (from != Source::repo && ::access(folder_index.c_str(), F_OK) == 0) {
         std::string why;
         folder = read_index(folder_index, why);
         if (!folder && !quiet) std::fprintf(stderr, "pkg: %s (left out)\n", why.c_str());
@@ -580,7 +630,7 @@ std::optional<std::vector<Available>> refresh_index(std::string& error, bool qui
     std::vector<Available> index;
     if (release) {
         index = folder ? merged(*release, *folder) : *release;
-    } else if (auto last = local_index(); last && folder) {
+    } else if (auto last = from == Source::any ? local_index() : std::nullopt; last && folder) {
         // Offline with both: the newer of the two first (the release's, as
         // the last update settled it, or what Termux fetched since).
         struct stat a{}, b{};
@@ -592,7 +642,7 @@ std::optional<std::vector<Available>> refresh_index(std::string& error, bool qui
         }
         return folder_newer ? merged(*folder, *last) : merged(*last, *folder);
     } else if (folder) {
-        if (!quiet) std::fprintf(stderr, "pkg: %s; using %s\n", offline.c_str(), folder_index.c_str());
+        if (!quiet && from == Source::any) std::fprintf(stderr, "pkg: %s; using %s\n", offline.c_str(), folder_index.c_str());
         index = *folder;
     } else if (last) {
         if (!quiet) std::fprintf(stderr, "pkg: %s; using the index from the last pkg update\n", offline.c_str());
@@ -601,7 +651,10 @@ std::optional<std::vector<Available>> refresh_index(std::string& error, bool qui
         error = offline + ", and there is no " + folder_index;
         return std::nullopt;
     }
-    if (!write_text(index_path(), format_index(index))) {
+    // Kept for list and info only when it is the whole picture (no --from)
+    // or the release's: an index settled from the packages folder alone
+    // would make the next plain upgrade go back to what that folder has.
+    if ((from == Source::any || from == Source::repo) && !write_text(index_path(), format_index(index))) {
         std::fprintf(stderr, "pkg: %s\n", errno_text("cannot keep", index_path()).c_str());
     }
     return index;
@@ -749,7 +802,10 @@ int cmd_install(const std::string& file, bool consume, std::string* id = nullptr
 /// error, when there is none.
 std::string obtain(const Available& a, bool& from_user, std::string& error) {
     from_user = false;
-    const std::string dirs[] = {archive_dir(), packages_dir(), std::string(download_dir)};
+    std::vector<std::string> dirs;
+    if (from == Source::any || from == Source::archive) dirs.push_back(archive_dir());
+    if (from == Source::any || from == Source::sqterm) dirs.push_back(packages_dir());
+    if (from == Source::any) dirs.emplace_back(download_dir);
     for (const std::string& dir : dirs) {
         const std::string path = dir + "/" + a.asset();
         if (::access(path.c_str(), R_OK) != 0) continue;
@@ -758,6 +814,11 @@ std::string obtain(const Available& a, bool& from_user, std::string& error) {
             return path;
         }
         std::fprintf(stderr, "pkg: %s does not match the index's sha256 (left alone)\n", path.c_str());
+    }
+    if (from == Source::archive || from == Source::sqterm) {
+        error = "no " + a.asset() + " in " + (from == Source::archive ? archive_dir() : packages_dir()) +
+                " (--from " + std::string(source_name(from)) + ")";
+        return {};
     }
     if (!make_directories(archive_dir())) {
         error = errno_text("cannot make", archive_dir());
@@ -960,6 +1021,110 @@ int cmd_search(std::string_view word) {
     return 0;
 }
 
+std::string megabytes(std::uint64_t bytes) {
+    std::array<char, 32> text{};
+    if (bytes < (std::uint64_t{1} << 20)) {
+        std::snprintf(text.data(), text.size(), "%llu KB", static_cast<unsigned long long>((bytes + 1023) >> 10));
+    } else {
+        std::snprintf(text.data(), text.size(), "%.1f MB", static_cast<double>(bytes) / (1 << 20));
+    }
+    return text.data();
+}
+
+/// `pkg info NAME`: what is installed of it, what the index says, and where
+/// its archive already is. No network: the index last settled on.
+int cmd_info(const std::string& name) {
+    if (!good_name(name)) return fail("a bad package name: " + name);
+    std::string error;
+    const auto m = installed(name, error);
+    const auto index = local_index();
+    const Available* a = index ? find_available(*index, name) : nullptr;
+    if (!m && a == nullptr) {
+        return fail(name + " is not installed, and no index names it (pkg update, pkg search)");
+    }
+    const auto row = [](const char* label, const std::string& value) { std::printf("%-12s %s\n", label, value.c_str()); };
+    row("name", name);
+    if (m) {
+        std::uint64_t bytes = 0;
+        for (const std::string& f : m->files) {
+            struct stat st{};
+            if (::lstat((prefix + "/" + f).c_str(), &st) == 0) bytes += static_cast<std::uint64_t>(st.st_size);
+        }
+        row("installed", m->version + " (" + (m->key.empty() ? "no key" : m->key) + "), " +
+                             std::to_string(m->files.size()) + " files, " + megabytes(bytes));
+        if (!m->license.empty()) row("license", m->license);
+    } else {
+        row("installed", "no");
+    }
+    if (a != nullptr) {
+        row("index", a->version + " (" + a->key + ")" + (m && m->key == a->key ? ", the same" : m ? ", differs (pkg upgrade)" : ""));
+        row("in the APK", a->bundled ? "yes" : "no");
+        std::string needs;
+        for (const std::string& n : a->needs) needs += (needs.empty() ? "" : " ") + n;
+        row("needs", needs.empty() ? "nothing" : needs);
+        // Where this very archive already is (named, not checked: install checks).
+        std::string here;
+        const std::pair<const char*, std::string> places[] = {
+            {"archive", archive_dir()}, {"sqterm", packages_dir()}, {"download", std::string(download_dir)}};
+        for (const auto& [label, dir] : places) {
+            if (::access((dir + "/" + a->asset()).c_str(), R_OK) == 0) here += (here.empty() ? "" : ", ") + std::string(label);
+        }
+        row("archive at", here.empty() ? "the repo only" : here + ", and the repo");
+    }
+    std::string needed_by;
+    if (index) {
+        const auto have = installed_names();
+        for (const Available& b : *index) {
+            if (have.contains(b.name) && std::find(b.needs.begin(), b.needs.end(), name) != b.needs.end()) {
+                needed_by += (needed_by.empty() ? "" : " ") + b.name;
+            }
+        }
+    }
+    if (!needed_by.empty()) row("needed by", needed_by);
+    return 0;
+}
+
+/// `pkg owns PATH`: which package installed it. PATH absolute (in the
+/// prefix), relative to the prefix, or a bare command name (bin/NAME).
+int cmd_owns(const std::string& what) {
+    std::vector<std::string> wanted;
+    if (what.starts_with(prefix + "/")) {
+        wanted.push_back(what.substr(prefix.size() + 1));
+    } else if (what.starts_with("/")) {
+        // Through a link into the prefix (/data/user/0 is /data/data).
+        std::array<char, PATH_MAX> real{}, real_prefix{};
+        if (::realpath(what.c_str(), real.data()) != nullptr && ::realpath(prefix.c_str(), real_prefix.data()) != nullptr &&
+            std::string_view(real.data()).starts_with(std::string(real_prefix.data()) + "/")) {
+            wanted.emplace_back(real.data() + std::strlen(real_prefix.data()) + 1);
+        } else {
+            return fail(what + " is not in the prefix (" + prefix + ")");
+        }
+    } else {
+        wanted.push_back(what);
+        if (what.find('/') == std::string::npos) wanted.push_back("bin/" + what);
+    }
+    // And what a link there points to, inside the prefix (coreutils' links).
+    for (std::size_t i = 0, n = wanted.size(); i < n; ++i) {
+        std::array<char, PATH_MAX> real{}, real_prefix{};
+        if (::realpath((prefix + "/" + wanted[i]).c_str(), real.data()) != nullptr &&
+            ::realpath(prefix.c_str(), real_prefix.data()) != nullptr) {
+            const std::string r = real.data(), rp = std::string(real_prefix.data()) + "/";
+            if (r.starts_with(rp) && r.substr(rp.size()) != wanted[i]) wanted.push_back(r.substr(rp.size()));
+        }
+    }
+    bool found = false;
+    for (const auto& [name, m] : installed_all()) {
+        for (const std::string& f : m.files) {
+            if (std::find(wanted.begin(), wanted.end(), f) != wanted.end()) {
+                std::printf("%s: %s\n", name.c_str(), f.c_str());
+                found = true;
+            }
+        }
+    }
+    if (!found) return fail("no installed package has " + what);
+    return 0;
+}
+
 /// `pkg install NAME`: the indexed package, and what it needs first, from
 /// wherever obtain finds them; a name no index knows (or no index at all):
 /// the newest archive of it in the packages folder, then Download.
@@ -974,7 +1139,11 @@ int install_by_name(const std::string& name, bool consume) {
             return install_available(*a, consume);
         }
     }
-    for (const std::string& dir : {packages_dir(), std::string(download_dir)}) {
+    std::vector<std::string> dirs;
+    if (from == Source::archive) dirs.push_back(archive_dir());
+    if (from == Source::any || from == Source::sqterm) dirs.push_back(packages_dir());
+    if (from == Source::any) dirs.emplace_back(download_dir);
+    for (const std::string& dir : dirs) {
         const std::string found = newest_in(dir, name);
         if (!found.empty()) {
             std::printf("pkg: %s (no index names %s: not checked)\n", found.c_str(), name.c_str());
@@ -982,6 +1151,7 @@ int install_by_name(const std::string& name, bool consume) {
         }
     }
     if (!index) return fail(error);
+    if (from != Source::any) return fail("no " + name + " --from " + std::string(source_name(from)) + " (pkg search --from " + std::string(source_name(from)) + ")");
     return fail("no " + name + " in the index, " + packages_dir() + " or " + std::string(download_dir) +
                 " (pkg search)");
 }
@@ -1151,14 +1321,17 @@ int cmd_backup(std::string_view name, const std::string& dir) {
 int usage() {
     std::fprintf(stderr,
                  "usage: pkg list\n"
+                 "       pkg info NAME\n"
                  "       pkg files NAME\n"
-                 "       pkg update\n"
-                 "       pkg upgrade [NAME...]\n"
-                 "       pkg search [WORD]\n"
-                 "       pkg install NAME|FILE [--consume]\n"
+                 "       pkg owns PATH|COMMAND\n"
+                 "       pkg update [--from SOURCE]\n"
+                 "       pkg upgrade [NAME...] [--from SOURCE]\n"
+                 "       pkg search [WORD] [--from SOURCE]\n"
+                 "       pkg install NAME|FILE [--consume] [--from SOURCE]\n"
                  "       pkg remove NAME [--force]\n"
                  "       pkg backup NAME [DIR]\n"
-                 "       pkg clean\n");
+                 "       pkg clean\n"
+                 "SOURCE: archive (pkg's own), sqterm (/sdcard/sqterm/packages), repo (the release)\n");
     return 2;
 }
 
@@ -1181,7 +1354,7 @@ std::size_t distance(std::string_view a, std::string_view b) {
 /// A command pkg does not have: say so, and name the one it is closest to
 /// (`pkg istall` means install), rather than only print the usage.
 int unknown(const std::string& cmd) {
-    static constexpr std::string_view commands[] = {"list", "files", "update", "upgrade", "search",
+    static constexpr std::string_view commands[] = {"list", "info", "files", "owns", "update", "upgrade", "search",
                                                     "install", "remove", "backup", "clean"};
     for (const std::string_view c : commands) {
         if (c == cmd) return usage();  // a known command, wrong arguments
@@ -1208,31 +1381,61 @@ int main(int argc, char** argv) {
     if (p == nullptr || *p != '/') return fail("PREFIX is not set (sqterm's shell sets it)");
     prefix = p;
     records = prefix + "/var/lib/sqterm/pkg";
-    const std::vector<std::string> args(argv + 1, argv + argc);
+    // Options anywhere after the command: --consume, --force, --from SOURCE.
+    std::vector<std::string> args;
+    bool consume = false, force = false;
+    for (int i = 1; i < argc; ++i) {
+        const std::string_view arg = argv[i];
+        std::string_view source;
+        if (arg == "--consume") {
+            consume = true;
+        } else if (arg == "--force") {
+            force = true;
+        } else if (arg == "--from" || arg.starts_with("--from=")) {
+            if (arg == "--from") {
+                if (i + 1 >= argc) return fail("--from needs a source: archive, sqterm or repo");
+                source = argv[++i];
+            } else {
+                source = arg.substr(7);
+            }
+            if (source == "archive") {
+                from = Source::archive;
+            } else if (source == "sqterm") {
+                from = Source::sqterm;
+            } else if (source == "repo") {
+                from = Source::repo;
+            } else {
+                return fail("--from " + std::string(source) + ": the sources are archive, sqterm and repo");
+            }
+        } else {
+            args.emplace_back(arg);
+        }
+    }
     if (args.empty()) return usage();
     const std::string& cmd = args[0];
+    const bool sourced = cmd == "install" || cmd == "upgrade" || cmd == "update" || cmd == "search";
+    if (from != Source::any && !sourced) return fail("--from is for install, upgrade, update and search");
+    if (consume && cmd != "install") return fail("--consume is for install");
+    if (force && cmd != "remove") return fail("--force is for remove");
     if (cmd == "list" && args.size() == 1) return cmd_list();
+    if (cmd == "info" && args.size() == 2) return cmd_info(args[1]);
     if (cmd == "files" && args.size() == 2) return cmd_files(args[1]);
+    if (cmd == "owns" && args.size() == 2) return cmd_owns(args[1]);
     if (cmd == "update" && args.size() == 1) return cmd_update();
     if (cmd == "upgrade") return cmd_upgrade({args.begin() + 1, args.end()});
     if (cmd == "search" && args.size() <= 2) return cmd_search(args.size() == 2 ? args[1] : std::string());
-    if (cmd == "install" && (args.size() == 2 || args.size() == 3)) {
-        // --consume before or after the package.
-        const bool consume = args.size() == 3;
-        if (consume && args[1] != "--consume" && args[2] != "--consume") return usage();
-        const std::string& what = args.size() == 3 && args[1] == "--consume" ? args[2] : args[1];
+    if (cmd == "install" && args.size() == 2) {
+        const std::string& what = args[1];
         // A path, or a file here: as given. A bare package name: the
-        // release's (install_by_name).
+        // index's (install_by_name).
         struct stat st{};
         if (what.find('/') == std::string::npos && ::stat(what.c_str(), &st) != 0 && good_name(what)) {
             return install_by_name(what, consume);
         }
+        if (from != Source::any) return fail("--from is for installing by name, not a file");
         return cmd_install_file(what, consume);
     }
-    if (cmd == "remove" && args.size() == 2) return cmd_remove(args[1], false);
-    if (cmd == "remove" && args.size() == 3 && (args[1] == "--force" || args[2] == "--force")) {
-        return cmd_remove(args[1] == "--force" ? args[2] : args[1], true);
-    }
+    if (cmd == "remove" && args.size() == 2) return cmd_remove(args[1], force);
     if (cmd == "clean" && args.size() == 1) return cmd_clean();
     if (cmd == "backup" && (args.size() == 2 || args.size() == 3)) {
         return cmd_backup(args[1], args.size() == 3 ? args[2] : std::string("."));
