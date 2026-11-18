@@ -3,37 +3,57 @@
 // This file is YOURS (ownership class: seeded, sqterm's own).
 //
 //   pkg list                         what is installed: name, version, key,
-//                                    and the release's key where it differs
+//                                    and the index's key where it differs
 //   pkg files NAME                   the files a package installed
-//   pkg update                       the release's index: what it has
+//   pkg update                       settle the index: what there is
 //   pkg upgrade [NAME...]            each installed package (or those named)
-//                                    whose key differs from the release's,
-//                                    downloaded and installed
-//   pkg search [WORD]                the release's packages (with WORD in the
-//                                    name), and which are installed
-//   pkg install NAME                 from the release, as built for this
-//                                    key; offline, the newest
-//                                    NAME-<version>-*.tar.zst (or .tar) in
-//                                    the download folder ($PKG_DIR, default
-//                                    /sdcard/Download)
+//                                    whose key differs from the index's, and
+//                                    what installed packages need and lack
+//   pkg search [WORD]                the index's packages (with WORD in the
+//                                    name), what they need, which are installed
+//   pkg install NAME [--consume]     by name: the index's, and what it needs
+//                                    first; a name no index knows, the newest
+//                                    NAME-<version>-*.tar.zst (or .tar) in the
+//                                    packages folder, then Download
 //   pkg install FILE [--consume]     a package from a file (.tar.zst, or the
 //                                    .tar pkg backup writes); --consume
 //                                    deletes FILE once it is installed
-//   pkg remove NAME                  its files, then its record
+//   pkg remove NAME [--force]        its files, then its record; refused while
+//                                    an installed package needs it
 //   pkg backup NAME [DIR]            its installed files as a package again,
 //                                    DIR/NAME-VERSION.tar (default: here)
+//   pkg clean                        empty the internal archive
 //
-// The network, only when asked: update, upgrade and install NAME download
-// from the GitHub release named `packages` (where CI publishes every
-// package, .github/workflows/packages.yml), through curl (a package of its
-// own, in the APK). The release's `index` names, for each package, the
-// version, key and sha256 of the archive built from main's recipes; pkg
-// keeps the last one it fetched in $PREFIX/var/lib/sqterm/release-index and
-// checks every archive against its sha256 before installing it. That sha256
-// guards against a broken download, as HTTPS guards the way there; neither
-// is a signature (sqcart 3.0 defines those). SQ_PACKAGES_URL (default
-// https://github.com/squared-netizen/sqterm/releases/download) points
-// elsewhere: a mirror, or a test. Everything else reads files only.
+// Names, never file names: a package is installed, upgraded and removed by
+// its name, wherever its archive is, and the keys and sha256s in archive
+// names are pkg's to match, not anyone's to type.
+//
+// The index. CI publishes, beside the archives in the GitHub release named
+// `packages`, an `index`: for each package main's recipes ask for, its
+// version, key, whether the APK carries it, its archive's sha256, and what it
+// needs at run time (packages/needs). tools/fetch_packages.sh --get writes
+// one of the same form into the packages folder for what it fetched. `pkg
+// update` (and upgrade, install NAME and search, which start with it)
+// settles one: the release's, through curl, with what only the packages
+// folder's names after it; offline, the packages folder's; else the last
+// one settled on. Kept in $PREFIX/var/lib/sqterm/release-index.
+//
+// The archives. An indexed package's archive is looked for, by its exact
+// name and checked against the index's sha256, in
+//   $PREFIX/var/cache/sqterm/archive   the internal archive: what pkg
+//                                      downloaded, one a package (pkg clean)
+//   $PKG_DIR                           the packages folder, default
+//                                      /sdcard/sqterm/packages (shared
+//                                      storage: Termux writes it, and it
+//                                      survives the app)
+//   /sdcard/Download                   a browser's
+// and only then downloaded from the release into the internal archive. So
+// update and upgrade work offline from the packages folder, and an archive
+// already here is never downloaded again. The sha256s guard against a
+// broken or mixed-up file, and HTTPS the way there; neither is a signature
+// (sqcart 3.0 defines those). SQ_PACKAGES_URL (default
+// https://github.com/squared-netizen/sqterm/releases/download) points at a
+// mirror, or a test.
 //
 // Each package carries SQ-INF/manifest.json (packages/build.sh writes it: the
 // squared-cartridge envelope, kind "package", and a "sqterm" consumer with
@@ -229,23 +249,37 @@ void delete_files(const std::vector<std::string>& files) {
     }
 }
 
-// ---- the release: its index, sha256, curl ----
+// ---- where packages come from: the release, the packages folder, the archive ----
 
-/// One line of the release's index: an archive CI built from main's recipes.
+/// One package as an index names it: an archive built from main's recipes.
 struct Available {
     std::string name;
     std::string version;
     std::string key;
     std::string sha256;
-    bool bundled = true;  ///< in the APK as well
+    bool bundled = true;             ///< in the APK as well
+    std::vector<std::string> needs;  ///< what it needs at run time, installed first
 
     std::string asset() const { return name + "-" + version + "-" + key + ".tar.zst"; }
 };
 
-constexpr std::string_view index_header = "sqterm release index 1";
+/// Index versions: 1 (no needs), 2 (a sixth field: needs, comma-separated, or -).
+constexpr std::string_view index_header_1 = "sqterm release index 1";
+constexpr std::string_view index_header_2 = "sqterm release index 2";
 
+/// The index pkg last settled on (pkg update), all sources merged.
 std::string index_path() { return prefix + "/var/lib/sqterm/release-index"; }
-std::string cache_dir() { return prefix + "/var/cache/sqterm/pkg"; }
+/// The internal archive: what pkg downloaded, kept (one archive a package) so
+/// a reinstall or an install on another day needs no network. pkg clean.
+std::string archive_dir() { return prefix + "/var/cache/sqterm/archive"; }
+/// The packages folder in shared storage, which Termux can write
+/// (tools/fetch_packages.sh --get) and which survives the app: $PKG_DIR.
+std::string packages_dir() {
+    const char* d = std::getenv("PKG_DIR");
+    return d != nullptr && *d != '\0' ? d : "/sdcard/sqterm/packages";
+}
+/// Where a browser leaves a package downloaded by hand.
+constexpr std::string_view download_dir = "/sdcard/Download";
 
 /// Where the release's files are: <base>/<file>.
 std::string release_base() {
@@ -262,48 +296,74 @@ bool hex_of(std::string_view text, std::size_t length) {
            });
 }
 
-/// The release index as text: its header, then "name version key bundled
-/// sha256" a line, in the order the packages build (what one depends on
+/// An index as text: its header, then "name version key bundled sha256
+/// [needs]" a line, in the order the packages build (what one depends on
 /// before it). Empty, with the reason in error, when it is not one.
 std::optional<std::vector<Available>> parse_index(const std::string& text, std::string& error) {
     std::vector<Available> out;
     std::size_t at = 0;
-    bool first = true;
+    std::size_t fields = 0;  // 5 or 6, from the header
     while (at < text.size()) {
         std::size_t end = text.find('\n', at);
         if (end == std::string::npos) end = text.size();
         const std::string line = text.substr(at, end - at);
         at = end + 1;
-        if (first) {
-            if (line != index_header) {
-                error = "not a release index (its first line: " + line.substr(0, 40) + ")";
+        if (fields == 0) {
+            if (line == index_header_1) {
+                fields = 5;
+            } else if (line == index_header_2) {
+                fields = 6;
+            } else {
+                error = "not a package index (its first line: " + line.substr(0, 40) + ")";
                 return std::nullopt;
             }
-            first = false;
             continue;
         }
         if (line.empty()) continue;
-        std::array<std::string, 5> f;
-        std::size_t field = 0, from = 0;
-        for (; field < f.size() && from <= line.size(); ++field) {
+        std::vector<std::string> f;
+        for (std::size_t from = 0; from <= line.size();) {
             std::size_t space = line.find(' ', from);
             if (space == std::string::npos) space = line.size();
-            f[field] = line.substr(from, space - from);
+            f.push_back(line.substr(from, space - from));
             from = space + 1;
         }
-        if (field != f.size() || from <= line.size() || !good_name(f[0]) || f[1].empty() ||
-            !(f[1][0] >= '0' && f[1][0] <= '9') || !good_name(f[1]) || !hex_of(f[2], 16) ||
-            (f[3] != "yes" && f[3] != "no") || !hex_of(f[4], 64)) {
-            error = "a bad line in the release index: " + line.substr(0, 80);
+        bool good = f.size() == fields && good_name(f[0]) && !f[1].empty() && f[1][0] >= '0' &&
+                    f[1][0] <= '9' && good_name(f[1]) && hex_of(f[2], 16) && (f[3] == "yes" || f[3] == "no") &&
+                    hex_of(f[4], 64);
+        Available a{f.size() > 0 ? f[0] : "", f.size() > 1 ? f[1] : "", f.size() > 2 ? f[2] : "",
+                    f.size() > 4 ? f[4] : "", f.size() > 3 && f[3] == "yes", {}};
+        if (good && fields == 6 && f[5] != "-") {
+            for (std::size_t from = 0; from <= f[5].size();) {
+                std::size_t comma = f[5].find(',', from);
+                if (comma == std::string::npos) comma = f[5].size();
+                const std::string need = f[5].substr(from, comma - from);
+                good = good && good_name(need) && need != a.name;
+                a.needs.push_back(need);
+                from = comma + 1;
+            }
+        }
+        if (!good) {
+            error = "a bad line in the package index: " + line.substr(0, 80);
             return std::nullopt;
         }
-        out.push_back({f[0], f[1], f[2], f[4], f[3] == "yes"});
+        out.push_back(std::move(a));
     }
-    if (first) {
-        error = "an empty release index";
+    if (fields == 0) {
+        error = "an empty package index";
         return std::nullopt;
     }
     return out;
+}
+
+std::string format_index(const std::vector<Available>& index) {
+    std::string text = std::string(index_header_2) + "\n";
+    for (const Available& a : index) {
+        std::string needs;
+        for (const std::string& n : a.needs) needs += (needs.empty() ? "" : ",") + n;
+        text += a.name + " " + a.version + " " + a.key + " " + (a.bundled ? "yes" : "no") + " " + a.sha256 + " " +
+                (needs.empty() ? "-" : needs) + "\n";
+    }
+    return text;
 }
 
 std::optional<std::string> read_text(const std::string& path) {
@@ -322,13 +382,35 @@ std::optional<std::string> read_text(const std::string& path) {
     return text;
 }
 
-/// The index `pkg update` last fetched; nothing if it never has.
-std::optional<std::vector<Available>> local_index() {
-    const auto text = read_text(index_path());
-    if (!text) return std::nullopt;
-    std::string error;
+bool write_text(const std::string& path, const std::string& text) {
+    const std::string part = path + ".part";
+    const int fd = ::open(part.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) return false;
+    const bool written = ::write(fd, text.data(), text.size()) == static_cast<ssize_t>(text.size());
+    if (::close(fd) != 0 || !written || ::rename(part.c_str(), path.c_str()) != 0) {
+        ::unlink(part.c_str());
+        return false;
+    }
+    return true;
+}
+
+std::optional<std::vector<Available>> read_index(const std::string& path, std::string& error) {
+    const auto text = read_text(path);
+    if (!text) {
+        error = errno_text("cannot read", path);
+        return std::nullopt;
+    }
     auto index = parse_index(*text, error);
-    if (!index) std::fprintf(stderr, "pkg: %s: %s\n", index_path().c_str(), error.c_str());
+    if (!index) error = path + ": " + error;
+    return index;
+}
+
+/// The index `pkg update` last settled on; nothing if it never has.
+std::optional<std::vector<Available>> local_index() {
+    std::string error;
+    if (::access(index_path().c_str(), F_OK) != 0) return std::nullopt;
+    auto index = read_index(index_path(), error);
+    if (!index) std::fprintf(stderr, "pkg: %s\n", error.c_str());
     return index;
 }
 
@@ -337,6 +419,16 @@ const Available* find_available(const std::vector<Available>& index, std::string
         if (a.name == name) return &a;
     }
     return nullptr;
+}
+
+/// `first`, then what `second` has that `first` has not.
+std::vector<Available> merged(std::vector<Available> first, const std::vector<Available>& second) {
+    std::set<std::string> have;
+    for (const Available& a : first) have.insert(a.name);
+    for (const Available& a : second) {
+        if (!have.contains(a.name)) first.push_back(a);
+    }
+    return first;
 }
 
 /// SHA-256 (FIPS 180-4) of a file, in hex; empty if it cannot be read.
@@ -429,7 +521,7 @@ int curl_to(const std::string& url, const std::string& out, bool progress) {
     if (progress && ::isatty(STDERR_FILENO)) {
         args.emplace_back("--progress-bar");
     } else {
-        args.emplace_back("-sS");
+        args.emplace_back("-s");  // pkg says what went wrong itself
     }
     args.insert(args.end(), {"-o", out, url});
     std::vector<char*> argv;
@@ -455,29 +547,62 @@ std::string curl_failed(int status, const std::string& url) {
     return "curl " + std::to_string(status) + " for " + url;
 }
 
-/// `pkg update`: the release's index, fetched and checked, then kept.
-/// Quiet: say nothing but errors.
-std::optional<std::vector<Available>> fetch_index(std::string& error) {
+/// The index, freshly settled (`pkg update`, and what upgrade and install
+/// NAME start with): the release's when it can be reached, with what only
+/// the packages folder's index names after it; offline, the packages
+/// folder's, then the last one settled on. Kept for `pkg list`. Says where
+/// it came from when that is not the release, unless `quiet`.
+std::optional<std::vector<Available>> refresh_index(std::string& error, bool quiet = false) {
     const std::string dir = prefix + "/var/lib/sqterm";
     if (!make_directories(dir)) {
         error = errno_text("cannot make", dir);
         return std::nullopt;
     }
-    const std::string part = index_path() + ".part";
+    // The release's.
+    std::optional<std::vector<Available>> release;
+    std::string offline;
+    const std::string part = index_path() + ".download";
     const std::string url = release_base() + "/index";
-    const int status = curl_to(url, part, false);
-    if (status != 0) {
-        ::unlink(part.c_str());
-        error = curl_failed(status, url);
+    if (const int status = curl_to(url, part, false); status == 0) {
+        release = read_index(part, offline);
+    } else {
+        offline = curl_failed(status, url);
+    }
+    ::unlink(part.c_str());
+    // The packages folder's (tools/fetch_packages.sh --get writes it).
+    std::optional<std::vector<Available>> folder;
+    const std::string folder_index = packages_dir() + "/index";
+    if (::access(folder_index.c_str(), F_OK) == 0) {
+        std::string why;
+        folder = read_index(folder_index, why);
+        if (!folder && !quiet) std::fprintf(stderr, "pkg: %s (left out)\n", why.c_str());
+    }
+    std::vector<Available> index;
+    if (release) {
+        index = folder ? merged(*release, *folder) : *release;
+    } else if (auto last = local_index(); last && folder) {
+        // Offline with both: the newer of the two first (the release's, as
+        // the last update settled it, or what Termux fetched since).
+        struct stat a{}, b{};
+        const bool folder_newer = ::stat(folder_index.c_str(), &a) == 0 && ::stat(index_path().c_str(), &b) == 0 &&
+                                  a.st_mtime > b.st_mtime;
+        if (!quiet) {
+            std::fprintf(stderr, "pkg: %s; using %s\n", offline.c_str(),
+                         folder_newer ? folder_index.c_str() : "the index from the last pkg update");
+        }
+        return folder_newer ? merged(*folder, *last) : merged(*last, *folder);
+    } else if (folder) {
+        if (!quiet) std::fprintf(stderr, "pkg: %s; using %s\n", offline.c_str(), folder_index.c_str());
+        index = *folder;
+    } else if (last) {
+        if (!quiet) std::fprintf(stderr, "pkg: %s; using the index from the last pkg update\n", offline.c_str());
+        return last;
+    } else {
+        error = offline + ", and there is no " + folder_index;
         return std::nullopt;
     }
-    const auto text = read_text(part);
-    auto index = text ? parse_index(*text, error) : std::nullopt;
-    if (!text) error = errno_text("cannot read", part);
-    if (!index || ::rename(part.c_str(), index_path().c_str()) != 0) {
-        if (index) error = errno_text("cannot keep", index_path());
-        ::unlink(part.c_str());
-        return std::nullopt;
+    if (!write_text(index_path(), format_index(index))) {
+        std::fprintf(stderr, "pkg: %s\n", errno_text("cannot keep", index_path()).c_str());
     }
     return index;
 }
@@ -523,7 +648,7 @@ int cmd_list() {
                     static_cast<int>(version_width), m.version.c_str(),
                     m.key.empty() ? "-" : m.key.c_str(), note.c_str());
     }
-    if (behind > 0) std::printf("pkg: %zu differ from the release (pkg upgrade)\n", behind);
+    if (behind > 0) std::printf("pkg: %zu differ from the index (pkg upgrade)\n", behind);
     return 0;
 }
 
@@ -535,12 +660,6 @@ int cmd_files(std::string_view name) {
     return 0;
 }
 
-/// The download folder pkg looks in for an install by name.
-std::string download_dir() {
-    const char* d = std::getenv("PKG_DIR");
-    return d != nullptr && *d != '\0' ? d : "/sdcard/Download";
-}
-
 /// NAME-<version>[-key].tar.zst or .tar: the version starts with a digit, so
 /// zsh never matches zsh-autosuggestions-0.7.1.tar.zst.
 bool archive_of(std::string_view file, std::string_view name) {
@@ -550,47 +669,28 @@ bool archive_of(std::string_view file, std::string_view name) {
     return file.ends_with(".tar.zst") || file.ends_with(".tar");
 }
 
-/// What `pkg install NAME` means: the newest NAME archive in the download
-/// folder (by time: fetch_packages.sh --get writes the one it fetched last).
-/// Empty, with the reason in error, when there is none.
-std::string find_archive(const std::string& name, std::string& error) {
-    const std::string dir = download_dir();
+/// The newest NAME archive in a folder, by time; empty if none.
+std::string newest_in(const std::string& dir, const std::string& name) {
     DIR* d = ::opendir(dir.c_str());
-    if (d == nullptr) {
-        const bool refused = errno == EACCES || errno == EPERM;
-        error = errno_text("cannot read", dir);
-        if (refused && shared_storage(dir)) error += files_permission;
-        return {};
-    }
+    if (d == nullptr) return {};
     std::string best;
-    std::vector<std::string> others;
     struct timespec best_time{};
     while (const dirent* e = ::readdir(d)) {
         if (!archive_of(e->d_name, name)) continue;
         const std::string path = dir + "/" + e->d_name;
         struct stat st{};
         if (::stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue;
-        const bool newer = best.empty() || st.st_mtim.tv_sec > best_time.tv_sec ||
-                           (st.st_mtim.tv_sec == best_time.tv_sec && st.st_mtim.tv_nsec > best_time.tv_nsec);
-        if (newer) {
-            if (!best.empty()) others.push_back(best);
+        if (best.empty() || st.st_mtim.tv_sec > best_time.tv_sec ||
+            (st.st_mtim.tv_sec == best_time.tv_sec && st.st_mtim.tv_nsec > best_time.tv_nsec)) {
             best = path;
             best_time = st.st_mtim;
-        } else {
-            others.push_back(path);
         }
     }
     ::closedir(d);
-    if (best.empty()) {
-        error = "no " + name + "-<version>.tar.zst in " + dir +
-                "\n     fetch it first, in Termux: tools/fetch_packages.sh --get " + name;
-        return {};
-    }
-    for (const std::string& o : others) std::printf("pkg: also in %s, older: %s\n", dir.c_str(), o.c_str() + dir.size() + 1);
     return best;
 }
 
-int cmd_install(const std::string& file, bool consume) {
+int cmd_install(const std::string& file, bool consume, std::string* id = nullptr) {
     if (!make_directories(records)) return fail(errno_text("cannot make", records));
     const std::string incoming = records + "/.incoming";
     remove_tree(incoming);
@@ -633,6 +733,7 @@ int cmd_install(const std::string& file, bool consume) {
     }
     std::printf("pkg: %s %s installed (%zu files)\n", fresh->id.c_str(), fresh->version.c_str(),
                 fresh->files.size());
+    if (id != nullptr) *id = fresh->id;
     if (consume) {
         if (::unlink(file.c_str()) != 0) return fail(errno_text("installed, but cannot delete", file));
         std::printf("pkg: %s deleted\n", file.c_str());
@@ -640,55 +741,158 @@ int cmd_install(const std::string& file, bool consume) {
     return 0;
 }
 
-int cmd_remove(std::string_view name) {
+/// Where an indexed package's archive is: the internal archive, the
+/// packages folder or Download when one holds that very archive (checked
+/// against the index's sha256), else downloaded from the release into the
+/// internal archive. `from_user` is set when it is a file of the user's (in
+/// shared storage), which --consume may delete; empty, with the reason in
+/// error, when there is none.
+std::string obtain(const Available& a, bool& from_user, std::string& error) {
+    from_user = false;
+    const std::string dirs[] = {archive_dir(), packages_dir(), std::string(download_dir)};
+    for (const std::string& dir : dirs) {
+        const std::string path = dir + "/" + a.asset();
+        if (::access(path.c_str(), R_OK) != 0) continue;
+        if (sha256_file(path) == a.sha256) {
+            from_user = dir != archive_dir();
+            return path;
+        }
+        std::fprintf(stderr, "pkg: %s does not match the index's sha256 (left alone)\n", path.c_str());
+    }
+    if (!make_directories(archive_dir())) {
+        error = errno_text("cannot make", archive_dir());
+        return {};
+    }
+    const std::string file = archive_dir() + "/" + a.asset();
+    const std::string part = file + ".part";
+    const std::string url = release_base() + "/" + a.asset();
+    std::printf("pkg: downloading %s\n", a.asset().c_str());
+    std::fflush(stdout);
+    if (const int status = curl_to(url, part, true); status != 0) {
+        ::unlink(part.c_str());
+        error = curl_failed(status, url) + "\n     or put " + a.asset() + " in " + packages_dir() +
+                " (in Termux: tools/fetch_packages.sh --get " + a.name + ")";
+        return {};
+    }
+    if (const std::string sum = sha256_file(part); sum != a.sha256) {
+        ::unlink(part.c_str());
+        error = a.asset() + ": sha256 " + (sum.empty() ? "unreadable" : sum) + ", the index says " + a.sha256 +
+                " (a broken download: try again)";
+        return {};
+    }
+    if (::rename(part.c_str(), file.c_str()) != 0) {
+        ::unlink(part.c_str());
+        error = errno_text("cannot keep", file);
+        return {};
+    }
+    return file;
+}
+
+/// One indexed package, installed from wherever obtain finds it. The
+/// internal archive keeps one archive a package: this one.
+int install_available(const Available& a, bool consume) {
+    bool from_user = false;
+    std::string error;
+    const std::string file = obtain(a, from_user, error);
+    if (file.empty()) return fail(error);
+    std::printf("pkg: %s\n", file.c_str());
+    const int result = cmd_install(file, consume && from_user);
+    if (result == 0 && !from_user) {
+        DIR* d = ::opendir(archive_dir().c_str());
+        while (const dirent* e = d != nullptr ? ::readdir(d) : nullptr) {
+            if (archive_of(e->d_name, a.name) && e->d_name != a.asset()) {
+                static_cast<void>(::unlink((archive_dir() + "/" + e->d_name).c_str()));
+            }
+        }
+        if (d != nullptr) ::closedir(d);
+    }
+    return result;
+}
+
+/// What `name` needs at run time and is not installed, installed first,
+/// and what that needs before it. `installed` grows as they are.
+int install_needs(const std::vector<Available>& index, const std::string& name, std::set<std::string>& installed,
+                  std::vector<std::string>& chain) {
+    const Available* a = find_available(index, name);
+    if (a == nullptr) return 0;
+    if (std::find(chain.begin(), chain.end(), name) != chain.end()) {
+        return fail("the index's needs go round in a circle at " + name);
+    }
+    chain.push_back(name);
+    for (const std::string& need : a->needs) {
+        if (installed.contains(need)) continue;
+        const Available* n = find_available(index, need);
+        if (n == nullptr) {
+            chain.pop_back();
+            return fail(name + " needs " + need + ", which no index names");
+        }
+        if (install_needs(index, need, installed, chain) != 0) return 1;
+        std::printf("pkg: %s needs %s\n", name.c_str(), need.c_str());
+        if (install_available(*n, false) != 0) return 1;
+        installed.insert(need);
+    }
+    chain.pop_back();
+    return 0;
+}
+
+std::set<std::string> installed_names() {
+    std::set<std::string> out;
+    for (const auto& [name, m] : installed_all()) out.insert(name);
+    return out;
+}
+
+/// After an install from a file: what its index entry needs, if pkg knows
+/// it (the last index settled on; no network for that).
+void needs_after_file(const std::string& name) {
+    const auto index = local_index();
+    if (!index) return;
+    auto have = installed_names();
+    std::vector<std::string> chain;
+    static_cast<void>(install_needs(*index, name, have, chain));
+}
+
+int cmd_install_file(const std::string& file, bool consume) {
+    std::string name;
+    const int result = cmd_install(file, consume, &name);
+    if (result == 0) needs_after_file(name);
+    return result;
+}
+
+int cmd_remove(std::string_view name, bool force) {
     std::string error;
     const auto m = installed(name, error);
     if (!m) return fail(error);
+    if (!force) {
+        if (const auto index = local_index()) {
+            const auto have = installed_names();
+            std::string needed_by;
+            for (const Available& a : *index) {
+                if (have.contains(a.name) && std::find(a.needs.begin(), a.needs.end(), name) != a.needs.end()) {
+                    needed_by += (needed_by.empty() ? "" : ", ") + a.name;
+                }
+            }
+            if (!needed_by.empty()) {
+                return fail(std::string(name) + " is needed by " + needed_by + " (pkg remove " + std::string(name) +
+                            " --force to remove it anyway)");
+            }
+        }
+    }
     delete_files(m->files);
     if (!remove_tree(record_of(name))) return fail(errno_text("cannot remove", record_of(name)));
     std::printf("pkg: %s %s removed\n", m->id.c_str(), m->version.c_str());
     return 0;
 }
 
-/// One package from the release: downloaded into the cache, checked against
-/// the index's sha256, installed, and the download deleted.
-int install_available(const Available& a) {
-    if (!make_directories(cache_dir())) return fail(errno_text("cannot make", cache_dir()));
-    const std::string file = cache_dir() + "/" + a.asset();
-    const std::string part = file + ".part";
-    const std::string url = release_base() + "/" + a.asset();
-    std::printf("pkg: %s %s (%s), from the release\n", a.name.c_str(), a.version.c_str(), a.key.c_str());
-    std::fflush(stdout);
-    const int status = curl_to(url, part, true);
-    if (status != 0) {
-        ::unlink(part.c_str());
-        return fail(curl_failed(status, url));
-    }
-    const std::string sum = sha256_file(part);
-    if (sum != a.sha256) {
-        ::unlink(part.c_str());
-        return fail(a.asset() + ": sha256 " + (sum.empty() ? "unreadable" : sum) + ", the index says " +
-                    a.sha256 + " (a broken download: try again)");
-    }
-    if (::rename(part.c_str(), file.c_str()) != 0) {
-        ::unlink(part.c_str());
-        return fail(errno_text("cannot keep", file));
-    }
-    const int result = cmd_install(file, false);
-    ::unlink(file.c_str());
-    return result;
-}
-
 int cmd_update() {
     std::string error;
-    const auto index = fetch_index(error);
+    const auto index = refresh_index(error);
     if (!index) return fail(error);
     const auto all = installed_all();
     std::vector<std::string> behind;
     for (const auto& [name, m] : all) {
         if (const Available* a = find_available(*index, name); a && a->key != m.key) behind.push_back(name);
     }
-    std::printf("pkg: the release has %zu packages; %zu installed differ", index->size(), behind.size());
+    std::printf("pkg: %zu packages known; %zu installed differ", index->size(), behind.size());
     for (std::size_t i = 0; i < behind.size(); ++i) std::printf("%s%s", i == 0 ? ": " : ", ", behind[i].c_str());
     std::printf("%s\n", behind.empty() ? "" : " (pkg upgrade)");
     return 0;
@@ -696,12 +900,12 @@ int cmd_update() {
 
 int cmd_upgrade(const std::vector<std::string>& names) {
     std::string error;
-    const auto index = fetch_index(error);
+    const auto index = refresh_index(error);
     if (!index) return fail(error);
     const auto all = installed_all();
     for (const std::string& name : names) {
         if (!all.contains(name)) return fail(name + " is not installed (pkg install " + name + ")");
-        if (!find_available(*index, name)) return fail("no " + name + " in the release");
+        if (!find_available(*index, name)) return fail("no " + name + " in the index");
     }
     // In the index's order: what a package depends on before it.
     std::vector<const Available*> todo;
@@ -711,60 +915,98 @@ int cmd_upgrade(const std::vector<std::string>& names) {
         if (!names.empty() && std::find(names.begin(), names.end(), a.name) == names.end()) continue;
         todo.push_back(&a);
     }
-    if (todo.empty()) {
-        std::printf("pkg: %s up to date with the release\n", names.empty() ? "everything is" : "already");
-        return 0;
-    }
+    auto have = installed_names();
     int failed = 0;
     for (const Available* a : todo) {
-        if (install_available(*a) != 0) ++failed;
+        std::vector<std::string> chain;
+        if (install_needs(*index, a->name, have, chain) != 0 || install_available(*a, false) != 0) ++failed;
     }
-    if (failed > 0) return fail(std::to_string(failed) + " of " + std::to_string(todo.size()) + " not upgraded");
+    // What is installed and needs what is not (lldb without runtimes).
+    std::size_t added = 0;
+    for (const Available& a : *index) {
+        if (!have.contains(a.name)) continue;
+        if (!names.empty() && std::find(names.begin(), names.end(), a.name) == names.end()) continue;
+        const std::size_t before = have.size();
+        std::vector<std::string> chain;
+        if (install_needs(*index, a.name, have, chain) != 0) ++failed;
+        added += have.size() - before;
+    }
+    if (failed > 0) return fail(std::to_string(failed) + " not upgraded");
+    if (todo.empty() && added == 0) {
+        std::printf("pkg: %s up to date\n", names.empty() ? "everything is" : "already");
+    }
     return 0;
 }
 
 int cmd_search(std::string_view word) {
     std::string error;
-    auto index = fetch_index(error);
-    if (!index) {
-        index = local_index();
-        if (!index) return fail(error);
-        std::fprintf(stderr, "pkg: %s; the index from the last pkg update:\n", error.c_str());
-    }
+    const auto index = refresh_index(error);
+    if (!index) return fail(error);
     const auto all = installed_all();
     std::size_t width = 0;
     for (const Available& a : *index) width = std::max(width, a.name.size());
     for (const Available& a : *index) {
         if (a.name.find(word) == std::string::npos) continue;
         const auto it = all.find(a.name);
-        const char* state = it == all.end() ? "" : it->second.key == a.key ? "  installed" : "  installed, differs";
-        std::printf("%-*s  %s%s%s\n", static_cast<int>(width), a.name.c_str(), a.version.c_str(),
-                    a.bundled ? "" : "  (large: not in the APK)", state);
+        std::string notes;
+        if (!a.bundled) notes += "  (not in the APK)";
+        if (!a.needs.empty()) {
+            notes += "  needs";
+            for (const std::string& n : a.needs) notes += " " + n;
+        }
+        if (it != all.end()) notes += it->second.key == a.key ? "  installed" : "  installed, differs";
+        std::printf("%-*s  %s%s\n", static_cast<int>(width), a.name.c_str(), a.version.c_str(), notes.c_str());
     }
     return 0;
 }
 
-/// `pkg install NAME`: the release's, as built for its key; the one in the
-/// download folder when it is that very archive (nothing to download), or,
-/// when the release cannot be reached, the newest one there.
+/// `pkg install NAME`: the indexed package, and what it needs first, from
+/// wherever obtain finds them; a name no index knows (or no index at all):
+/// the newest archive of it in the packages folder, then Download.
 int install_by_name(const std::string& name, bool consume) {
     std::string error;
-    const auto index = fetch_index(error);
+    const auto index = refresh_index(error, true);
     if (index) {
-        const Available* a = find_available(*index, name);
-        if (a == nullptr) return fail("no " + name + " in the release (pkg search)");
-        const std::string local = download_dir() + "/" + a->asset();
-        if (::access(local.c_str(), R_OK) == 0 && sha256_file(local) == a->sha256) {
-            std::printf("pkg: %s\n", local.c_str());
-            return cmd_install(local, consume);
+        if (const Available* a = find_available(*index, name)) {
+            auto have = installed_names();
+            std::vector<std::string> chain;
+            if (install_needs(*index, name, have, chain) != 0) return 1;
+            return install_available(*a, consume);
         }
-        return install_available(*a);
     }
-    std::fprintf(stderr, "pkg: %s; looking in %s\n", error.c_str(), download_dir().c_str());
-    const std::string found = find_archive(name, error);
-    if (found.empty()) return fail(error);
-    std::printf("pkg: %s\n", found.c_str());
-    return cmd_install(found, consume);
+    for (const std::string& dir : {packages_dir(), std::string(download_dir)}) {
+        const std::string found = newest_in(dir, name);
+        if (!found.empty()) {
+            std::printf("pkg: %s (no index names %s: not checked)\n", found.c_str(), name.c_str());
+            return cmd_install_file(found, consume);
+        }
+    }
+    if (!index) return fail(error);
+    return fail("no " + name + " in the index, " + packages_dir() + " or " + std::string(download_dir) +
+                " (pkg search)");
+}
+
+int cmd_clean() {
+    DIR* d = ::opendir(archive_dir().c_str());
+    if (d == nullptr) {
+        std::printf("pkg: the archive is empty\n");
+        return 0;
+    }
+    std::uint64_t bytes = 0;
+    std::size_t count = 0;
+    while (const dirent* e = ::readdir(d)) {
+        if (e->d_name[0] == '.') continue;
+        const std::string path = archive_dir() + "/" + e->d_name;
+        struct stat st{};
+        if (::lstat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode) && ::unlink(path.c_str()) == 0) {
+            bytes += static_cast<std::uint64_t>(st.st_size);
+            ++count;
+        }
+    }
+    ::closedir(d);
+    std::printf("pkg: %zu archive(s) deleted, %llu MB freed\n", count,
+                static_cast<unsigned long long>((bytes + (1 << 19)) >> 20));
+    return 0;
 }
 
 // ---- backup: a plain ustar archive, as packages/build.sh writes them ----
@@ -914,8 +1156,9 @@ int usage() {
                  "       pkg upgrade [NAME...]\n"
                  "       pkg search [WORD]\n"
                  "       pkg install NAME|FILE [--consume]\n"
-                 "       pkg remove NAME\n"
-                 "       pkg backup NAME [DIR]\n");
+                 "       pkg remove NAME [--force]\n"
+                 "       pkg backup NAME [DIR]\n"
+                 "       pkg clean\n");
     return 2;
 }
 
@@ -939,7 +1182,7 @@ std::size_t distance(std::string_view a, std::string_view b) {
 /// (`pkg istall` means install), rather than only print the usage.
 int unknown(const std::string& cmd) {
     static constexpr std::string_view commands[] = {"list", "files", "update", "upgrade", "search",
-                                                    "install", "remove", "backup"};
+                                                    "install", "remove", "backup", "clean"};
     for (const std::string_view c : commands) {
         if (c == cmd) return usage();  // a known command, wrong arguments
     }
@@ -984,9 +1227,13 @@ int main(int argc, char** argv) {
         if (what.find('/') == std::string::npos && ::stat(what.c_str(), &st) != 0 && good_name(what)) {
             return install_by_name(what, consume);
         }
-        return cmd_install(what, consume);
+        return cmd_install_file(what, consume);
     }
-    if (cmd == "remove" && args.size() == 2) return cmd_remove(args[1]);
+    if (cmd == "remove" && args.size() == 2) return cmd_remove(args[1], false);
+    if (cmd == "remove" && args.size() == 3 && (args[1] == "--force" || args[2] == "--force")) {
+        return cmd_remove(args[1] == "--force" ? args[2] : args[1], true);
+    }
+    if (cmd == "clean" && args.size() == 1) return cmd_clean();
     if (cmd == "backup" && (args.size() == 2 || args.size() == 3)) {
         return cmd_backup(args[1], args.size() == 3 ? args[2] : std::string("."));
     }

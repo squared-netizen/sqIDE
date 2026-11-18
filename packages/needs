@@ -1,0 +1,23 @@
+# What each package needs at run time: pkg installs these first (pkg install,
+# upgrade), and refuses to remove one while a package that needs it is
+# installed. "name: what it needs", a line a package that needs anything.
+#
+# Its own file, not a field in the recipes: every package's key covers its
+# recipe folder, and what a package needs at run time changes nothing about
+# how it is built, so changing it here rebuilds nothing. Not the recipes'
+# `depends`, which is what a package is built against: curl links mbedtls in
+# and needs nothing of it at run time.
+#
+# CI copies this into the release's index (the sixth field), and
+# tools/fetch_packages.sh --get into the packages folder's.
+
+# clang compiles against the sysroot (bionic's headers and libraries) and
+# links C++ with the runtimes (libc++, libunwind, compiler-rt).
+llvm: sysroot runtimes
+# clangd and clang-tidy read the same headers clang does.
+llvm-tools: llvm
+# lldb, lldb-server and liblldb.so load libc++_shared.so.1 (2026-11-18,
+# the phone: "library libc++_shared.so.1 not found").
+lldb: runtimes
+zsh-autosuggestions: zsh
+zsh-syntax-highlighting: zsh
