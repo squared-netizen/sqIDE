@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,6 +69,21 @@ int fail(const std::string& message) {
 std::string errno_text(std::string_view what, const std::string& path) {
     return std::string(what) + " " + path + ": " + strerror(errno);
 }
+
+/// Whether a path is in shared storage (Download and the rest), where an
+/// app reads and writes only with the Files permission.
+bool shared_storage(const std::string& path) {
+    std::array<char, PATH_MAX> real{};
+    const std::string resolved = ::realpath(path.c_str(), real.data()) != nullptr ? real.data() : path;
+    for (const std::string_view root : {"/sdcard", "/storage", "/mnt/sdcard"}) {
+        if (resolved.starts_with(root) || path.starts_with(root)) return true;
+    }
+    return false;
+}
+
+/// What to do when Android refused shared storage: said once, after the error.
+constexpr std::string_view files_permission =
+    "\n     sqterm needs the Files permission: Settings, Apps, sqterm, Permissions, Files";
 
 /// A package's name: letters, digits, '.', '_', '+', '-'; not starting with '.'.
 bool good_name(std::string_view name) {
@@ -220,11 +236,11 @@ int cmd_install(const std::string& file, bool consume) {
     if (sqterm::unpack_archive(file.c_str(), prefix.c_str(), incoming.c_str(), error.data(),
                        error.size()) != 0) {
         remove_tree(incoming);
-        if (std::string_view(error.data()).find("Permission denied") != std::string_view::npos &&
-            (file.starts_with("/sdcard") || file.starts_with("/storage"))) {
-            return fail(file + ": " + error.data() +
-                        "\n     sqterm needs the Files permission: Settings, Apps, sqterm, "
-                        "Permissions, Files");
+        const std::string_view said(error.data());
+        if ((said.find("Permission denied") != std::string_view::npos ||
+             said.find("Operation not permitted") != std::string_view::npos) &&
+            shared_storage(file)) {
+            return fail(file + ": " + error.data() + std::string(files_permission));
         }
         return fail(file + ": " + error.data());
     }
@@ -388,7 +404,14 @@ int cmd_backup(std::string_view name, const std::string& dir) {
     const std::string out = dir + "/" + m->id + "-" + m->version + ".tar";
     const std::string part = out + ".part";
     const int fd = ::open(part.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-    if (fd < 0) return fail(errno_text("cannot create", part));
+    if (fd < 0) {
+        const bool refused = errno == EACCES || errno == EPERM;
+        std::string message = errno_text("cannot create", part);
+        // 2026-11-17, on the phone: "cannot create .../Download/zsh-5.9.2.tar.part:
+        // Operation not permitted", with nothing to say why.
+        if (refused && shared_storage(dir)) message += files_permission;
+        return fail(message);
+    }
     TarOut tar(fd);
     tar.add("SQ-INF/manifest.json", record_of(m->id) + "/manifest.json");
     std::vector<std::string> files = m->files;
