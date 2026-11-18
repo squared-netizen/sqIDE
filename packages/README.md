@@ -122,7 +122,7 @@ pkg, so it is never stored twice:
 
 ```sh
 tools/fetch_packages.sh --get llvm          # Termux: into ~/storage/downloads
-pkg install /sdcard/Download/llvm-23.1.5-<key>.tar.zst --consume   # in sqterm
+pkg install llvm --consume                  # in sqterm: the newest llvm-*.tar.zst in Download
 ```
 
 llvm is built on CI only (hours on a phone): CMake and Ninja, the NDK's CMake
@@ -170,7 +170,8 @@ over each other's.
 ```sh
 pkg list                          # installed: name, version
 pkg files zsh                     # what zsh installed
-pkg install /sdcard/Download/zsh-5.9.2-<key>.tar.zst --consume
+pkg install zsh --consume         # by name: the newest zsh-<version>-*.tar.zst in Download
+pkg install ./zsh-5.9.2.tar        # or a file, as before
 pkg remove make
 pkg backup zsh /sdcard/Download     # zsh-5.9.2.tar: its files as a package again
 ```

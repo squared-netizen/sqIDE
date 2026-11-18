@@ -4,6 +4,10 @@
 //
 //   pkg list                         what is installed: name, version
 //   pkg files NAME                   the files a package installed
+//   pkg install NAME [--consume]     the newest NAME-<version>-*.tar.zst (or
+//                                    .tar) in the download folder ($PKG_DIR,
+//                                    default /sdcard/Download): what
+//                                    fetch_packages.sh --get leaves there
 //   pkg install FILE [--consume]     a package from a file (.tar.zst, or the
 //                                    .tar pkg backup writes); --consume
 //                                    deletes FILE once it is installed
@@ -209,13 +213,21 @@ int cmd_list() {
     }
     ::closedir(dir);
     std::sort(names.begin(), names.end());
+    // Read first, so the version column lines up past the longest name
+    // (zsh-syntax-highlighting).
+    std::vector<std::pair<std::string, std::string>> rows;
+    std::size_t width = 0;
     for (const std::string& name : names) {
         std::string error;
         if (const auto m = installed(name, error)) {
-            std::printf("%-12s %s\n", m->id.c_str(), m->version.c_str());
+            width = std::max(width, m->id.size());
+            rows.emplace_back(m->id, m->version);
         } else {
             std::fprintf(stderr, "pkg: %s\n", error.c_str());
         }
+    }
+    for (const auto& [id, version] : rows) {
+        std::printf("%-*s  %s\n", static_cast<int>(width), id.c_str(), version.c_str());
     }
     return 0;
 }
@@ -226,6 +238,61 @@ int cmd_files(std::string_view name) {
     if (!m) return fail(error);
     for (const std::string& file : m->files) std::printf("%s\n", file.c_str());
     return 0;
+}
+
+/// The download folder pkg looks in for an install by name.
+std::string download_dir() {
+    const char* d = std::getenv("PKG_DIR");
+    return d != nullptr && *d != '\0' ? d : "/sdcard/Download";
+}
+
+/// NAME-<version>[-key].tar.zst or .tar: the version starts with a digit, so
+/// zsh never matches zsh-autosuggestions-0.7.1.tar.zst.
+bool archive_of(std::string_view file, std::string_view name) {
+    if (!file.starts_with(name) || file.size() <= name.size() + 1 || file[name.size()] != '-') return false;
+    const char next = file[name.size() + 1];
+    if (next < '0' || next > '9') return false;
+    return file.ends_with(".tar.zst") || file.ends_with(".tar");
+}
+
+/// What `pkg install NAME` means: the newest NAME archive in the download
+/// folder (by time: fetch_packages.sh --get writes the one it fetched last).
+/// Empty, with the reason in error, when there is none.
+std::string find_archive(const std::string& name, std::string& error) {
+    const std::string dir = download_dir();
+    DIR* d = ::opendir(dir.c_str());
+    if (d == nullptr) {
+        const bool refused = errno == EACCES || errno == EPERM;
+        error = errno_text("cannot read", dir);
+        if (refused && shared_storage(dir)) error += files_permission;
+        return {};
+    }
+    std::string best;
+    std::vector<std::string> others;
+    struct timespec best_time{};
+    while (const dirent* e = ::readdir(d)) {
+        if (!archive_of(e->d_name, name)) continue;
+        const std::string path = dir + "/" + e->d_name;
+        struct stat st{};
+        if (::stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        const bool newer = best.empty() || st.st_mtim.tv_sec > best_time.tv_sec ||
+                           (st.st_mtim.tv_sec == best_time.tv_sec && st.st_mtim.tv_nsec > best_time.tv_nsec);
+        if (newer) {
+            if (!best.empty()) others.push_back(best);
+            best = path;
+            best_time = st.st_mtim;
+        } else {
+            others.push_back(path);
+        }
+    }
+    ::closedir(d);
+    if (best.empty()) {
+        error = "no " + name + "-<version>.tar.zst in " + dir +
+                "\n     fetch it first, in Termux: tools/fetch_packages.sh --get " + name;
+        return {};
+    }
+    for (const std::string& o : others) std::printf("pkg: also in %s, older: %s\n", dir.c_str(), o.c_str() + dir.size() + 1);
+    return best;
 }
 
 int cmd_install(const std::string& file, bool consume) {
@@ -431,7 +498,7 @@ int usage() {
     std::fprintf(stderr,
                  "usage: pkg list\n"
                  "       pkg files NAME\n"
-                 "       pkg install FILE [--consume]\n"
+                 "       pkg install NAME|FILE [--consume]\n"
                  "       pkg remove NAME\n"
                  "       pkg backup NAME [DIR]\n");
     return 2;
@@ -449,8 +516,22 @@ int main(int argc, char** argv) {
     const std::string& cmd = args[0];
     if (cmd == "list" && args.size() == 1) return cmd_list();
     if (cmd == "files" && args.size() == 2) return cmd_files(args[1]);
-    if (cmd == "install" && (args.size() == 2 || (args.size() == 3 && args[2] == "--consume"))) {
-        return cmd_install(args[1], args.size() == 3);
+    if (cmd == "install" && (args.size() == 2 || args.size() == 3)) {
+        // --consume before or after the package.
+        const bool consume = args.size() == 3;
+        if (consume && args[1] != "--consume" && args[2] != "--consume") return usage();
+        const std::string& what = args.size() == 3 && args[1] == "--consume" ? args[2] : args[1];
+        // A path, or a file here: as given. A bare package name: the newest
+        // archive of it in the download folder.
+        struct stat st{};
+        if (what.find('/') == std::string::npos && ::stat(what.c_str(), &st) != 0 && good_name(what)) {
+            std::string error;
+            const std::string found = find_archive(what, error);
+            if (found.empty()) return fail(error);
+            std::printf("pkg: %s\n", found.c_str());
+            return cmd_install(found, consume);
+        }
+        return cmd_install(what, consume);
     }
     if (cmd == "remove" && args.size() == 2) return cmd_remove(args[1]);
     if (cmd == "backup" && (args.size() == 2 || args.size() == 3)) {
