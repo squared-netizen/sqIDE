@@ -99,8 +99,8 @@ private:
     void say(std::string_view text);
 
     Places places_;
-    std::array<std::string, 11> environment_text_;
-    std::array<std::string_view, 11> environment_{};
+    std::array<std::string, 12> environment_text_;
+    std::array<std::string_view, 12> environment_{};
     std::size_t environment_count_ = 0;
     std::string program_;  ///< the prefix's zsh, or Android's sh without it
     sq::term::Terminal terminal_;

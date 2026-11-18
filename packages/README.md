@@ -31,9 +31,12 @@ zsh-autosuggestions/, zsh-syntax-highlighting/
                   zsh scripts (0.7.1, MIT; 0.8.0, BSD), git sources: the rest
                   of a line offered in grey as it is typed, and the line
                   coloured (a command that does not exist in red)
-pkg/recipe.sh     pkg (sq_app/pkg/pkg.cpp): list, files, install a package from
-                  a file (--consume), remove, backup; sqterm's own, built from
-                  this repository (no download)
+pkg/recipe.sh     pkg (sq_app/pkg/pkg.cpp): list, files, update, upgrade,
+                  search, install (from the release, or a file), remove,
+                  backup; sqterm's own, built from this repository (no
+                  download)
+mbedtls/, curl/   Mbed TLS 4.3.0 (Apache-2.0; static, for building) and curl
+                  8.23.0 (curl licence; HTTPS, in the APK): pkg's downloads
 bash/ coreutils/ sed/ grep/ gawk/ make/
                   GNU (GPLv3): bash 5.3, coreutils 9.8 (one binary, symbolic
                   links), sed 4.9, grep 3.12, gawk 5.3.2
@@ -121,8 +124,14 @@ published like the others but not carried in the APK: its archive goes to
 pkg, so it is never stored twice:
 
 ```sh
+pkg install llvm                            # in sqterm: from the release (below)
+```
+
+or, without the network in sqterm, through Termux and Download:
+
+```sh
 tools/fetch_packages.sh --get llvm          # Termux: into ~/storage/downloads
-pkg install llvm --consume                  # in sqterm: the newest llvm-*.tar.zst in Download
+pkg install llvm --consume                  # in sqterm: that file, then deleted
 ```
 
 llvm is built on CI only (hours on a phone): CMake and Ninja, the NDK's CMake
@@ -155,6 +164,14 @@ first. Built as runtimes are (clang 23 for the build machine, the sysroot,
 no NDK), with CMake told the system is Android. No Python or Lua scripting,
 line editing or curses GUI yet: each is a library to build first.
 
+**mbedtls** (`bundled=no`): Mbed TLS 4.3.0, TLS and X.509, static libraries
+and headers, built with CMake. curl links it in; nothing runs it.
+
+**curl** (in the APK): curl 8.23.0, HTTP/1.1 and HTTPS through mbedtls, with
+Android's own trust store (`/system/etc/security/cacerts`, or the updatable
+one in `/apex/com.android.conscrypt/cacerts`, which the shell names in
+`SSL_CERT_DIR`). What pkg downloads with.
+
 ## The manifest, and pkg
 
 Every package carries `SQ-INF/manifest.json`, written by `build.sh`: the
@@ -168,13 +185,35 @@ over each other's.
 `pkg` reads those records:
 
 ```sh
-pkg list                          # installed: name, version
+pkg list                          # installed: name, version, key (and the release's, if it differs)
 pkg files zsh                     # what zsh installed
-pkg install zsh --consume         # by name: the newest zsh-<version>-*.tar.zst in Download
-pkg install ./zsh-5.9.2.tar        # or a file, as before
+pkg update                        # the release's index: what it has, what differs here
+pkg upgrade                       # every installed package whose key differs from the release's
+pkg upgrade runtimes lldb         # or only those
+pkg search llvm                   # the release's packages, and which are installed
+pkg install lldb                  # by name: from the release
+pkg install ./zsh-5.9.2.tar       # or a file
 pkg remove make
-pkg backup zsh /sdcard/Download     # zsh-5.9.2.tar: its files as a package again
+pkg backup zsh /sdcard/Download   # zsh-5.9.2.tar: its files as a package again
 ```
+
+**From the release.** CI publishes, beside the archives, an `index`:
+`sqterm release index 1`, then a line a package, `name version key bundled
+sha256`, for what main's recipes ask for, in build order (rewritten on every
+run on main). `pkg update`, `upgrade` and `install NAME` download it with
+curl, keep it in `$PREFIX/var/lib/sqterm/release-index`, download the
+archives they need into `$PREFIX/var/cache/sqterm/pkg/`, check each against
+the index's sha256, install it and delete the download. A package is
+compared by key, not by version: two builds of `runtimes 23.1.5` are two
+keys (2026-11-18: an old runtimes without `libc++_shared.so` read as up to
+date). Without the network, `pkg install NAME` falls back to the newest
+archive of it in Download, and uses the one there without downloading when
+it is the very archive the index names. `SQ_PACKAGES_URL` points pkg at a
+mirror (`<url>/packages/<file>`), as it does fetch_packages.sh.
+
+The sha256s guard against a broken download, and HTTPS the way there; they
+are not signatures. Packages the APK carries and pkg has upgraded are put
+back to the APK's own when an update of the app brings a different set.
 
 An upgrade (`pkg install` of a newer version) deletes the files the old
 version had and the new one has not, and the folders left empty. `--consume`
@@ -218,5 +257,3 @@ same bytes. Executables are stripped. The index, `sqterm packages 1` and a
 line a package (`name version file sha`), is what the app compares with the
 one it last installed: when they differ, it unpacks them all again.
 
-Not yet: removing what an older package had and a newer one does not (`pkg`,
-later in 12.5).

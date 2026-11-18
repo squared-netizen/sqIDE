@@ -8,8 +8,9 @@
 # CI adds an archive to the release for every key a package has had
 # (<name>-<version>-<key>.tar.zst), and never removes one: a recipe changed
 # ten times leaves ten. This keeps those the recipes in this folder ask for
-# (`bash packages/build.sh --keys`) and nothing else, so run it from an
-# up-to-date main: a checkout that is behind would delete what main needs,
+# (`bash packages/build.sh --keys`), and the `index` pkg reads, and nothing
+# else, so run it from an up-to-date main: a checkout that is behind would
+# delete what main needs,
 # and one that is ahead would keep what main does not. It refuses to delete
 # unless HEAD is origin/main as last fetched.
 #
@@ -59,7 +60,8 @@ kept=0 stale=0
 while read -r id asset; do
   [ -n "$id" ] || continue
   archive=${asset%.sha256}
-  if [ -n "${wanted[$archive]:-}" ]; then
+  # The index pkg reads (CI rewrites it on every run on main).
+  if [ -n "${wanted[$archive]:-}" ] || [ "$asset" = index ]; then
     kept=$((kept + 1))
     continue
   fi

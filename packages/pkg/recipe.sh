@@ -1,5 +1,6 @@
-# pkg: sqterm's package tool (sq_app/pkg/pkg.cpp): list, files, install from
-# a file (--consume), remove, backup. sqterm's own, built from this
+# pkg: sqterm's package tool (sq_app/pkg/pkg.cpp): list, files, update,
+# upgrade, search, install (from the release through curl, or from a file),
+# remove, backup. sqterm's own, built from this
 # repository: no source to download. Statically linked with the C++ library
 # (libc++ from the NDK on Android): one file in bin/.
 

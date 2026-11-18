@@ -213,3 +213,30 @@ jobs:
             gh release create "$RELEASE" --target "$GITHUB_SHA" --title "sqterm packages" \
               --notes "Every package CI has built, one archive per key: <name>-<version>-<key>.tar.zst, with its .sha256. On the phone, in sqterm's folder: tools/fetch_packages.sh"
           gh release upload "$RELEASE" dist/*
+
+      # What pkg reads (pkg update, upgrade, install NAME): for each package
+      # main's recipes ask for, its version, key, whether the APK carries it
+      # and its archive's sha256, in build order. Written on every run on
+      # main, also when nothing was built: a recipe changed back to an
+      # earlier key needs no build, only this. Replaced in place (--clobber);
+      # tools/prune_release.sh keeps it.
+      - name: The release's index, for pkg
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p shas
+          {
+            echo "sqterm release index 1"
+            while read -r name version key bundled; do
+              asset=$name-$version-$key.tar.zst
+              if [ -f "dist/$asset.sha256" ]; then
+                cp "dist/$asset.sha256" shas/
+              else
+                gh release download "$RELEASE" -p "$asset.sha256" -D shas --clobber
+              fi
+              sha=$(cut -d ' ' -f 1 "shas/$asset.sha256")
+              [ ${#sha} -eq 64 ] || { echo "no sha256 for $asset" >&2; exit 1; }
+              echo "$name $version $key $bundled $sha"
+            done < keys.txt
+          } > index
+          cat index
+          gh release upload "$RELEASE" index --clobber

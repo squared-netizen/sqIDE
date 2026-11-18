@@ -10,6 +10,8 @@ sed
 grep
 gawk
 make
+mbedtls
+curl
 llvm
 sysroot
 runtimes

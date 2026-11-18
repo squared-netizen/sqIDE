@@ -2,12 +2,20 @@
 //
 // This file is YOURS (ownership class: seeded, sqterm's own).
 //
-//   pkg list                         what is installed: name, version
+//   pkg list                         what is installed: name, version, key,
+//                                    and the release's key where it differs
 //   pkg files NAME                   the files a package installed
-//   pkg install NAME [--consume]     the newest NAME-<version>-*.tar.zst (or
-//                                    .tar) in the download folder ($PKG_DIR,
-//                                    default /sdcard/Download): what
-//                                    fetch_packages.sh --get leaves there
+//   pkg update                       the release's index: what it has
+//   pkg upgrade [NAME...]            each installed package (or those named)
+//                                    whose key differs from the release's,
+//                                    downloaded and installed
+//   pkg search [WORD]                the release's packages (with WORD in the
+//                                    name), and which are installed
+//   pkg install NAME                 from the release, as built for this
+//                                    key; offline, the newest
+//                                    NAME-<version>-*.tar.zst (or .tar) in
+//                                    the download folder ($PKG_DIR, default
+//                                    /sdcard/Download)
 //   pkg install FILE [--consume]     a package from a file (.tar.zst, or the
 //                                    .tar pkg backup writes); --consume
 //                                    deletes FILE once it is installed
@@ -15,8 +23,17 @@
 //   pkg backup NAME [DIR]            its installed files as a package again,
 //                                    DIR/NAME-VERSION.tar (default: here)
 //
-// Offline: pkg reads files, never the network. Getting a package file is
-// its own step (tools/fetch_packages.sh in Termux, or any copy).
+// The network, only when asked: update, upgrade and install NAME download
+// from the GitHub release named `packages` (where CI publishes every
+// package, .github/workflows/packages.yml), through curl (a package of its
+// own, in the APK). The release's `index` names, for each package, the
+// version, key and sha256 of the archive built from main's recipes; pkg
+// keeps the last one it fetched in $PREFIX/var/lib/sqterm/release-index and
+// checks every archive against its sha256 before installing it. That sha256
+// guards against a broken download, as HTTPS guards the way there; neither
+// is a signature (sqcart 3.0 defines those). SQ_PACKAGES_URL (default
+// https://github.com/squared-netizen/sqterm/releases/download) points
+// elsewhere: a mirror, or a test. Everything else reads files only.
 //
 // Each package carries SQ-INF/manifest.json (packages/build.sh writes it: the
 // squared-cartridge envelope, kind "package", and a "sqterm" consumer with
@@ -34,17 +51,20 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
+#include <spawn.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -54,11 +74,14 @@
 #include "unpack.hpp"
 #include "yyjson.h"
 
+extern char** environ;
+
 namespace {
 
 struct Manifest {
     std::string id;
     std::string version;
+    std::string key;                 ///< consumers.sqterm.key; empty if none
     std::vector<std::string> files;  ///< relative to the prefix
 };
 
@@ -124,8 +147,9 @@ std::optional<Manifest> read_manifest(const std::string& file, std::string& erro
     const char* kind = yyjson_get_str(yyjson_obj_get(root, "kind"));
     const char* id = yyjson_get_str(yyjson_obj_get(root, "id"));
     const char* version = yyjson_get_str(yyjson_obj_get(root, "version"));
-    yyjson_val* files =
-        yyjson_obj_get(yyjson_obj_get(yyjson_obj_get(root, "consumers"), "sqterm"), "files");
+    yyjson_val* sqterm = yyjson_obj_get(yyjson_obj_get(root, "consumers"), "sqterm");
+    yyjson_val* files = yyjson_obj_get(sqterm, "files");
+    const char* key = yyjson_get_str(yyjson_obj_get(sqterm, "key"));
     if (format == nullptr || std::string_view(format) != "squared-cartridge" || kind == nullptr ||
         std::string_view(kind) != "package" || id == nullptr || version == nullptr ||
         !yyjson_is_arr(files)) {
@@ -135,6 +159,7 @@ std::optional<Manifest> read_manifest(const std::string& file, std::string& erro
     }
     m.id = id;
     m.version = version;
+    if (key != nullptr) m.key = key;
     std::size_t index = 0, count = 0;
     yyjson_val* item = nullptr;
     yyjson_arr_foreach(files, index, count, item) {
@@ -204,31 +229,301 @@ void delete_files(const std::vector<std::string>& files) {
     }
 }
 
-int cmd_list() {
+// ---- the release: its index, sha256, curl ----
+
+/// One line of the release's index: an archive CI built from main's recipes.
+struct Available {
+    std::string name;
+    std::string version;
+    std::string key;
+    std::string sha256;
+    bool bundled = true;  ///< in the APK as well
+
+    std::string asset() const { return name + "-" + version + "-" + key + ".tar.zst"; }
+};
+
+constexpr std::string_view index_header = "sqterm release index 1";
+
+std::string index_path() { return prefix + "/var/lib/sqterm/release-index"; }
+std::string cache_dir() { return prefix + "/var/cache/sqterm/pkg"; }
+
+/// Where the release's files are: <base>/<file>.
+std::string release_base() {
+    const char* url = std::getenv("SQ_PACKAGES_URL");
+    if (url != nullptr && *url != '\0') return std::string(url) + "/packages";
+    const char* repo = std::getenv("SQ_PACKAGES_REPO");
+    return "https://github.com/" + std::string(repo != nullptr && *repo != '\0' ? repo : "squared-netizen/sqterm") +
+           "/releases/download/packages";
+}
+
+bool hex_of(std::string_view text, std::size_t length) {
+    return text.size() == length && std::all_of(text.begin(), text.end(), [](char c) {
+               return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+           });
+}
+
+/// The release index as text: its header, then "name version key bundled
+/// sha256" a line, in the order the packages build (what one depends on
+/// before it). Empty, with the reason in error, when it is not one.
+std::optional<std::vector<Available>> parse_index(const std::string& text, std::string& error) {
+    std::vector<Available> out;
+    std::size_t at = 0;
+    bool first = true;
+    while (at < text.size()) {
+        std::size_t end = text.find('\n', at);
+        if (end == std::string::npos) end = text.size();
+        const std::string line = text.substr(at, end - at);
+        at = end + 1;
+        if (first) {
+            if (line != index_header) {
+                error = "not a release index (its first line: " + line.substr(0, 40) + ")";
+                return std::nullopt;
+            }
+            first = false;
+            continue;
+        }
+        if (line.empty()) continue;
+        std::array<std::string, 5> f;
+        std::size_t field = 0, from = 0;
+        for (; field < f.size() && from <= line.size(); ++field) {
+            std::size_t space = line.find(' ', from);
+            if (space == std::string::npos) space = line.size();
+            f[field] = line.substr(from, space - from);
+            from = space + 1;
+        }
+        if (field != f.size() || from <= line.size() || !good_name(f[0]) || f[1].empty() ||
+            !(f[1][0] >= '0' && f[1][0] <= '9') || !good_name(f[1]) || !hex_of(f[2], 16) ||
+            (f[3] != "yes" && f[3] != "no") || !hex_of(f[4], 64)) {
+            error = "a bad line in the release index: " + line.substr(0, 80);
+            return std::nullopt;
+        }
+        out.push_back({f[0], f[1], f[2], f[4], f[3] == "yes"});
+    }
+    if (first) {
+        error = "an empty release index";
+        return std::nullopt;
+    }
+    return out;
+}
+
+std::optional<std::string> read_text(const std::string& path) {
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return std::nullopt;
+    std::string text;
+    std::array<char, 65536> buffer{};
+    for (;;) {
+        const ssize_t n = ::read(fd, buffer.data(), buffer.size());
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) break;
+        text.append(buffer.data(), static_cast<std::size_t>(n));
+        if (text.size() > (std::size_t{1} << 20)) break;  // an index is a few KB
+    }
+    ::close(fd);
+    return text;
+}
+
+/// The index `pkg update` last fetched; nothing if it never has.
+std::optional<std::vector<Available>> local_index() {
+    const auto text = read_text(index_path());
+    if (!text) return std::nullopt;
+    std::string error;
+    auto index = parse_index(*text, error);
+    if (!index) std::fprintf(stderr, "pkg: %s: %s\n", index_path().c_str(), error.c_str());
+    return index;
+}
+
+const Available* find_available(const std::vector<Available>& index, std::string_view name) {
+    for (const Available& a : index) {
+        if (a.name == name) return &a;
+    }
+    return nullptr;
+}
+
+/// SHA-256 (FIPS 180-4) of a file, in hex; empty if it cannot be read.
+std::string sha256_file(const std::string& path) {
+    static constexpr std::array<std::uint32_t, 64> k{
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+    std::array<std::uint32_t, 8> h{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                                   0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    const auto rotr = [](std::uint32_t x, int n) { return (x >> n) | (x << (32 - n)); };
+    const auto block = [&](const unsigned char* p) {
+        std::array<std::uint32_t, 64> w{};
+        for (int i = 0; i < 16; ++i) {
+            w[i] = std::uint32_t{p[4 * i]} << 24 | std::uint32_t{p[4 * i + 1]} << 16 |
+                   std::uint32_t{p[4 * i + 2]} << 8 | std::uint32_t{p[4 * i + 3]};
+        }
+        for (int i = 16; i < 64; ++i) {
+            const std::uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            const std::uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+        std::uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+        for (int i = 0; i < 64; ++i) {
+            const std::uint32_t t1 = hh + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + k[i] + w[i];
+            const std::uint32_t t2 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
+            hh = g, g = f, f = e, e = d + t1, d = c, c = b, b = a, a = t1 + t2;
+        }
+        h[0] += a, h[1] += b, h[2] += c, h[3] += d, h[4] += e, h[5] += f, h[6] += g, h[7] += hh;
+    };
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return {};
+    std::array<unsigned char, 65536> buffer{};
+    std::array<unsigned char, 64> partial{};
+    std::size_t held = 0;
+    std::uint64_t total = 0;
+    for (;;) {
+        const ssize_t n = ::read(fd, buffer.data(), buffer.size());
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0) {
+            ::close(fd);
+            return {};
+        }
+        if (n == 0) break;
+        total += static_cast<std::uint64_t>(n);
+        std::size_t at = 0;
+        const std::size_t got = static_cast<std::size_t>(n);
+        if (held > 0) {
+            const std::size_t take = std::min(got, partial.size() - held);
+            std::memcpy(partial.data() + held, buffer.data(), take);
+            held += take, at = take;
+            if (held < partial.size()) continue;
+            block(partial.data());
+            held = 0;
+        }
+        for (; at + 64 <= got; at += 64) block(buffer.data() + at);
+        std::memcpy(partial.data(), buffer.data() + at, got - at);
+        held = got - at;
+    }
+    ::close(fd);
+    partial[held++] = 0x80;
+    if (held > 56) {
+        std::fill(partial.begin() + static_cast<std::ptrdiff_t>(held), partial.end(), 0);
+        block(partial.data());
+        held = 0;
+    }
+    std::fill(partial.begin() + static_cast<std::ptrdiff_t>(held), partial.begin() + 56, 0);
+    const std::uint64_t bits = total * 8;
+    for (int i = 0; i < 8; ++i) partial[56 + i] = static_cast<unsigned char>(bits >> (56 - 8 * i));
+    block(partial.data());
+    std::string hex;
+    for (const std::uint32_t v : h) {
+        std::array<char, 9> part{};
+        std::snprintf(part.data(), part.size(), "%08x", v);
+        hex += part.data();
+    }
+    return hex;
+}
+
+/// curl, from the prefix: url into `out`. A bar while it downloads when
+/// `progress` and the terminal is there to see it. Its exit status, or 127
+/// when there is no curl to run.
+int curl_to(const std::string& url, const std::string& out, bool progress) {
+    std::vector<std::string> args{"curl", "-fL", "--retry", "3", "--connect-timeout", "20"};
+    if (progress && ::isatty(STDERR_FILENO)) {
+        args.emplace_back("--progress-bar");
+    } else {
+        args.emplace_back("-sS");
+    }
+    args.insert(args.end(), {"-o", out, url});
+    std::vector<char*> argv;
+    for (std::string& a : args) argv.push_back(a.data());
+    argv.push_back(nullptr);
+    pid_t pid = 0;
+    if (::posix_spawnp(&pid, "curl", nullptr, nullptr, argv.data(), environ) != 0) return 127;
+    int status = 0;
+    while (::waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) return 1;
+    }
+    if (!WIFEXITED(status)) return 1;
+    return WEXITSTATUS(status);
+}
+
+std::string curl_failed(int status, const std::string& url) {
+    if (status == 127) return "no curl to download with (it comes with sqterm: pkg install a curl package file)";
+    if (status == 22) return "not in the release: " + url;
+    if (status == 6 || status == 7 || status == 28) {
+        return "cannot reach " + url.substr(0, url.find('/', 8)) + " (curl " + std::to_string(status) +
+               "): offline?";
+    }
+    return "curl " + std::to_string(status) + " for " + url;
+}
+
+/// `pkg update`: the release's index, fetched and checked, then kept.
+/// Quiet: say nothing but errors.
+std::optional<std::vector<Available>> fetch_index(std::string& error) {
+    const std::string dir = prefix + "/var/lib/sqterm";
+    if (!make_directories(dir)) {
+        error = errno_text("cannot make", dir);
+        return std::nullopt;
+    }
+    const std::string part = index_path() + ".part";
+    const std::string url = release_base() + "/index";
+    const int status = curl_to(url, part, false);
+    if (status != 0) {
+        ::unlink(part.c_str());
+        error = curl_failed(status, url);
+        return std::nullopt;
+    }
+    const auto text = read_text(part);
+    auto index = text ? parse_index(*text, error) : std::nullopt;
+    if (!text) error = errno_text("cannot read", part);
+    if (!index || ::rename(part.c_str(), index_path().c_str()) != 0) {
+        if (index) error = errno_text("cannot keep", index_path());
+        ::unlink(part.c_str());
+        return std::nullopt;
+    }
+    return index;
+}
+
+/// What is installed, by name: each package's record.
+std::map<std::string, Manifest> installed_all() {
+    std::map<std::string, Manifest> out;
     DIR* dir = ::opendir(records.c_str());
-    if (dir == nullptr) return 0;  // nothing installed yet
+    if (dir == nullptr) return out;  // nothing installed yet
     std::vector<std::string> names;
     while (const dirent* entry = ::readdir(dir)) {
         if (good_name(entry->d_name)) names.emplace_back(entry->d_name);
     }
     ::closedir(dir);
-    std::sort(names.begin(), names.end());
-    // Read first, so the version column lines up past the longest name
-    // (zsh-syntax-highlighting).
-    std::vector<std::pair<std::string, std::string>> rows;
-    std::size_t width = 0;
     for (const std::string& name : names) {
         std::string error;
-        if (const auto m = installed(name, error)) {
-            width = std::max(width, m->id.size());
-            rows.emplace_back(m->id, m->version);
+        if (auto m = installed(name, error)) {
+            out.emplace(name, std::move(*m));
         } else {
             std::fprintf(stderr, "pkg: %s\n", error.c_str());
         }
     }
-    for (const auto& [id, version] : rows) {
-        std::printf("%-*s  %s\n", static_cast<int>(width), id.c_str(), version.c_str());
+    return out;
+}
+
+int cmd_list() {
+    const auto all = installed_all();
+    const auto index = local_index();
+    // Columns past the longest name and version (zsh-syntax-highlighting).
+    std::size_t name_width = 0, version_width = 0;
+    for (const auto& [name, m] : all) {
+        name_width = std::max(name_width, m.id.size());
+        version_width = std::max(version_width, m.version.size());
     }
+    std::size_t behind = 0;
+    for (const auto& [name, m] : all) {
+        std::string note;
+        if (const Available* a = index ? find_available(*index, name) : nullptr; a && a->key != m.key) {
+            note = "  -> " + (a->version != m.version ? a->version + " " : std::string()) + a->key;
+            ++behind;
+        }
+        std::printf("%-*s  %-*s  %s%s\n", static_cast<int>(name_width), m.id.c_str(),
+                    static_cast<int>(version_width), m.version.c_str(),
+                    m.key.empty() ? "-" : m.key.c_str(), note.c_str());
+    }
+    if (behind > 0) std::printf("pkg: %zu differ from the release (pkg upgrade)\n", behind);
     return 0;
 }
 
@@ -353,6 +648,123 @@ int cmd_remove(std::string_view name) {
     if (!remove_tree(record_of(name))) return fail(errno_text("cannot remove", record_of(name)));
     std::printf("pkg: %s %s removed\n", m->id.c_str(), m->version.c_str());
     return 0;
+}
+
+/// One package from the release: downloaded into the cache, checked against
+/// the index's sha256, installed, and the download deleted.
+int install_available(const Available& a) {
+    if (!make_directories(cache_dir())) return fail(errno_text("cannot make", cache_dir()));
+    const std::string file = cache_dir() + "/" + a.asset();
+    const std::string part = file + ".part";
+    const std::string url = release_base() + "/" + a.asset();
+    std::printf("pkg: %s %s (%s), from the release\n", a.name.c_str(), a.version.c_str(), a.key.c_str());
+    std::fflush(stdout);
+    const int status = curl_to(url, part, true);
+    if (status != 0) {
+        ::unlink(part.c_str());
+        return fail(curl_failed(status, url));
+    }
+    const std::string sum = sha256_file(part);
+    if (sum != a.sha256) {
+        ::unlink(part.c_str());
+        return fail(a.asset() + ": sha256 " + (sum.empty() ? "unreadable" : sum) + ", the index says " +
+                    a.sha256 + " (a broken download: try again)");
+    }
+    if (::rename(part.c_str(), file.c_str()) != 0) {
+        ::unlink(part.c_str());
+        return fail(errno_text("cannot keep", file));
+    }
+    const int result = cmd_install(file, false);
+    ::unlink(file.c_str());
+    return result;
+}
+
+int cmd_update() {
+    std::string error;
+    const auto index = fetch_index(error);
+    if (!index) return fail(error);
+    const auto all = installed_all();
+    std::vector<std::string> behind;
+    for (const auto& [name, m] : all) {
+        if (const Available* a = find_available(*index, name); a && a->key != m.key) behind.push_back(name);
+    }
+    std::printf("pkg: the release has %zu packages; %zu installed differ", index->size(), behind.size());
+    for (std::size_t i = 0; i < behind.size(); ++i) std::printf("%s%s", i == 0 ? ": " : ", ", behind[i].c_str());
+    std::printf("%s\n", behind.empty() ? "" : " (pkg upgrade)");
+    return 0;
+}
+
+int cmd_upgrade(const std::vector<std::string>& names) {
+    std::string error;
+    const auto index = fetch_index(error);
+    if (!index) return fail(error);
+    const auto all = installed_all();
+    for (const std::string& name : names) {
+        if (!all.contains(name)) return fail(name + " is not installed (pkg install " + name + ")");
+        if (!find_available(*index, name)) return fail("no " + name + " in the release");
+    }
+    // In the index's order: what a package depends on before it.
+    std::vector<const Available*> todo;
+    for (const Available& a : *index) {
+        const auto it = all.find(a.name);
+        if (it == all.end() || it->second.key == a.key) continue;
+        if (!names.empty() && std::find(names.begin(), names.end(), a.name) == names.end()) continue;
+        todo.push_back(&a);
+    }
+    if (todo.empty()) {
+        std::printf("pkg: %s up to date with the release\n", names.empty() ? "everything is" : "already");
+        return 0;
+    }
+    int failed = 0;
+    for (const Available* a : todo) {
+        if (install_available(*a) != 0) ++failed;
+    }
+    if (failed > 0) return fail(std::to_string(failed) + " of " + std::to_string(todo.size()) + " not upgraded");
+    return 0;
+}
+
+int cmd_search(std::string_view word) {
+    std::string error;
+    auto index = fetch_index(error);
+    if (!index) {
+        index = local_index();
+        if (!index) return fail(error);
+        std::fprintf(stderr, "pkg: %s; the index from the last pkg update:\n", error.c_str());
+    }
+    const auto all = installed_all();
+    std::size_t width = 0;
+    for (const Available& a : *index) width = std::max(width, a.name.size());
+    for (const Available& a : *index) {
+        if (a.name.find(word) == std::string::npos) continue;
+        const auto it = all.find(a.name);
+        const char* state = it == all.end() ? "" : it->second.key == a.key ? "  installed" : "  installed, differs";
+        std::printf("%-*s  %s%s%s\n", static_cast<int>(width), a.name.c_str(), a.version.c_str(),
+                    a.bundled ? "" : "  (large: not in the APK)", state);
+    }
+    return 0;
+}
+
+/// `pkg install NAME`: the release's, as built for its key; the one in the
+/// download folder when it is that very archive (nothing to download), or,
+/// when the release cannot be reached, the newest one there.
+int install_by_name(const std::string& name, bool consume) {
+    std::string error;
+    const auto index = fetch_index(error);
+    if (index) {
+        const Available* a = find_available(*index, name);
+        if (a == nullptr) return fail("no " + name + " in the release (pkg search)");
+        const std::string local = download_dir() + "/" + a->asset();
+        if (::access(local.c_str(), R_OK) == 0 && sha256_file(local) == a->sha256) {
+            std::printf("pkg: %s\n", local.c_str());
+            return cmd_install(local, consume);
+        }
+        return install_available(*a);
+    }
+    std::fprintf(stderr, "pkg: %s; looking in %s\n", error.c_str(), download_dir().c_str());
+    const std::string found = find_archive(name, error);
+    if (found.empty()) return fail(error);
+    std::printf("pkg: %s\n", found.c_str());
+    return cmd_install(found, consume);
 }
 
 // ---- backup: a plain ustar archive, as packages/build.sh writes them ----
@@ -498,6 +910,9 @@ int usage() {
     std::fprintf(stderr,
                  "usage: pkg list\n"
                  "       pkg files NAME\n"
+                 "       pkg update\n"
+                 "       pkg upgrade [NAME...]\n"
+                 "       pkg search [WORD]\n"
                  "       pkg install NAME|FILE [--consume]\n"
                  "       pkg remove NAME\n"
                  "       pkg backup NAME [DIR]\n");
@@ -523,7 +938,8 @@ std::size_t distance(std::string_view a, std::string_view b) {
 /// A command pkg does not have: say so, and name the one it is closest to
 /// (`pkg istall` means install), rather than only print the usage.
 int unknown(const std::string& cmd) {
-    static constexpr std::string_view commands[] = {"list", "files", "install", "remove", "backup"};
+    static constexpr std::string_view commands[] = {"list", "files", "update", "upgrade", "search",
+                                                    "install", "remove", "backup"};
     for (const std::string_view c : commands) {
         if (c == cmd) return usage();  // a known command, wrong arguments
     }
@@ -554,20 +970,19 @@ int main(int argc, char** argv) {
     const std::string& cmd = args[0];
     if (cmd == "list" && args.size() == 1) return cmd_list();
     if (cmd == "files" && args.size() == 2) return cmd_files(args[1]);
+    if (cmd == "update" && args.size() == 1) return cmd_update();
+    if (cmd == "upgrade") return cmd_upgrade({args.begin() + 1, args.end()});
+    if (cmd == "search" && args.size() <= 2) return cmd_search(args.size() == 2 ? args[1] : std::string());
     if (cmd == "install" && (args.size() == 2 || args.size() == 3)) {
         // --consume before or after the package.
         const bool consume = args.size() == 3;
         if (consume && args[1] != "--consume" && args[2] != "--consume") return usage();
         const std::string& what = args.size() == 3 && args[1] == "--consume" ? args[2] : args[1];
-        // A path, or a file here: as given. A bare package name: the newest
-        // archive of it in the download folder.
+        // A path, or a file here: as given. A bare package name: the
+        // release's (install_by_name).
         struct stat st{};
         if (what.find('/') == std::string::npos && ::stat(what.c_str(), &st) != 0 && good_name(what)) {
-            std::string error;
-            const std::string found = find_archive(what, error);
-            if (found.empty()) return fail(error);
-            std::printf("pkg: %s\n", found.c_str());
-            return cmd_install(found, consume);
+            return install_by_name(what, consume);
         }
         return cmd_install(what, consume);
     }

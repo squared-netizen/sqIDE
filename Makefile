@@ -91,26 +91,13 @@ include mk/squared_generated.mk
 #
 #   nc -klu 5555
 #
-# Android refuses sockets without the INTERNET permission, so a DEV_LOG build,
-# and a CONSOLE build (its bridge to Termux is a socket too: `make console`),
-# uses a copy of the manifest with that one line added. Your manifest is not
-# edited, and a normal build never carries the permission. Resolve a crash
-# address with: addr2line -f -C -e build/lib$(SQ_PROJECT).so <offset>
+# It, and a CONSOLE build's bridge to Termux (`make console`), are sockets,
+# which need the INTERNET permission: sqterm's manifest has it for every
+# build (pkg's downloads), so no build edits a copy. Resolve a crash address with:
+# addr2line -f -C -e build/lib$(SQ_PROJECT).so <offset>
 ifdef DEV_LOG
 DEV_LOG_PORT ?= 5555
 SQ_CPPFLAGS  += -DSQUARED_DEV_LOG=$(DEV_LOG_PORT)
-endif
-
-ifneq ($(or $(DEV_LOG),$(filter-out 0,$(CONSOLE))),)
-SQ_MANIFEST  := $(BUILD)/dev/AndroidManifest.xml
-
-$(SQ_MANIFEST): sq_android/AndroidManifest.xml
-	@mkdir -p $(dir $@)
-	@sed 's|^\([[:space:]]*\)<application\([[:space:]]*\)$$|\1<uses-permission android:name="android.permission.INTERNET" />\n\1<application\2|' \
-	    $< > $@
-	@grep -q 'permission.INTERNET' $@ || { \
-	  echo "dev build: could not add the INTERNET permission: no '<application' line" >&2; \
-	  rm -f $@; exit 1; }
 endif
 
 SQ_SO := $(BUILD)/lib$(SQ_PROJECT).so
