@@ -504,6 +504,44 @@ int usage() {
     return 2;
 }
 
+/// Levenshtein distance, for a mistyped command.
+std::size_t distance(std::string_view a, std::string_view b) {
+    std::vector<std::size_t> row(b.size() + 1);
+    for (std::size_t j = 0; j <= b.size(); ++j) row[j] = j;
+    for (std::size_t i = 1; i <= a.size(); ++i) {
+        std::size_t diagonal = row[0];
+        row[0] = i;
+        for (std::size_t j = 1; j <= b.size(); ++j) {
+            const std::size_t above = row[j];
+            row[j] = std::min({row[j] + 1, row[j - 1] + 1, diagonal + (a[i - 1] == b[j - 1] ? 0 : 1)});
+            diagonal = above;
+        }
+    }
+    return row[b.size()];
+}
+
+/// A command pkg does not have: say so, and name the one it is closest to
+/// (`pkg istall` means install), rather than only print the usage.
+int unknown(const std::string& cmd) {
+    static constexpr std::string_view commands[] = {"list", "files", "install", "remove", "backup"};
+    for (const std::string_view c : commands) {
+        if (c == cmd) return usage();  // a known command, wrong arguments
+    }
+    std::string_view best;
+    std::size_t best_distance = 3;  // at most two edits away
+    for (const std::string_view c : commands) {
+        const std::size_t d = distance(cmd, c);
+        if (d < best_distance) best = c, best_distance = d;
+    }
+    if (best.empty()) {
+        std::fprintf(stderr, "pkg: unknown command '%s'\n", cmd.c_str());
+    } else {
+        std::fprintf(stderr, "pkg: unknown command '%s'; did you mean %.*s?\n", cmd.c_str(),
+                     static_cast<int>(best.size()), best.data());
+    }
+    return usage();
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -537,5 +575,5 @@ int main(int argc, char** argv) {
     if (cmd == "backup" && (args.size() == 2 || args.size() == 3)) {
         return cmd_backup(args[1], args.size() == 3 ? args[2] : std::string("."));
     }
-    return usage();
+    return unknown(cmd);
 }
