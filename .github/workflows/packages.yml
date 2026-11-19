@@ -28,6 +28,10 @@ on:
       - sq_app/src/unpack.hpp
       - sq_app/third_party/zstd/**
       - squared/third_party/yyjson/**
+      # The cartridges' packer (not in any key: it packs the same installs).
+      - third_party/sqcart/**
+      - tools/cartridge/**
+      - tools/pack_cartridges.sh
       - .github/workflows/packages.yml
   pull_request:
     paths:  # the same list as push
@@ -38,6 +42,10 @@ on:
       - sq_app/src/unpack.hpp
       - sq_app/third_party/zstd/**
       - squared/third_party/yyjson/**
+      # The cartridges' packer (not in any key: it packs the same installs).
+      - third_party/sqcart/**
+      - tools/cartridge/**
+      - tools/pack_cartridges.sh
       - .github/workflows/packages.yml
   workflow_dispatch:
 
@@ -68,8 +76,10 @@ jobs:
           bash packages/build.sh --keys | tee keys.txt
           gh release view "$RELEASE" --json assets --jq '.assets[].name' > have.txt 2>/dev/null || : > have.txt
           missing=
+          # Each package as a tarball and, since 2026-11-19, as a cartridge.
           while read -r name version key bundled; do
-            grep -qx "$name-$version-$key.tar.zst" have.txt || missing="$missing $name"
+            { grep -qx "$name-$version-$key.tar.zst" have.txt && grep -qx "$name-$version-$key.sq" have.txt; } ||
+              missing="$missing $name"
           done < keys.txt
           echo "missing=${missing# }" >> "$GITHUB_OUTPUT"
           echo "to build:${missing:- nothing}"
@@ -93,13 +103,13 @@ jobs:
         if: steps.plan.outputs.missing != ''
         run: sudo apt-get install -y --no-install-recommends zstd xz-utils cmake ninja-build ccache
 
-      - name: clang 23 for this machine (the runtimes, lldb and sqdrive; the NDK's clang is 21)
-        if: contains(steps.plan.outputs.missing, 'runtimes') || contains(steps.plan.outputs.missing, 'lldb') || contains(steps.plan.outputs.missing, 'sqdrive')
+      - name: clang 23 for this machine (the runtimes, lldb, sqdrive and the cartridges' packer; the NDK's clang is 21)
+        if: steps.plan.outputs.missing != ''
         run: |
           curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
           echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm-23.list
           sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends clang-23 lld-23 llvm-23
+          sudo apt-get install -y --no-install-recommends clang-23 lld-23 llvm-23 libc++-23-dev libc++abi-23-dev
           /usr/lib/llvm-23/bin/clang --version | head -n 1
 
       - name: Compiler cache (kept even when a run fails)
@@ -161,6 +171,14 @@ jobs:
           clang --version | head -n 1
           bash packages/build.sh
 
+      # Packed afresh on every run (a minute), not cached: a cache is tied
+      # to its exact list of paths, and a path added to the builds' cache
+      # would miss every cache before it, and rebuild everything (llvm:
+      # hours).
+      - name: Each package as a cartridge too (offline)
+        if: steps.plan.outputs.missing != ''
+        run: bash tools/pack_cartridges.sh
+
       - name: Save the finished builds
         if: always() && steps.plan.outputs.missing != ''
         uses: actions/cache/save@v4
@@ -193,11 +211,17 @@ jobs:
           mkdir dist
           while read -r name version key bundled; do
             asset=$name-$version-$key.tar.zst
-            grep -qx "$asset" have.txt && continue
-            from=sq_android/assets/packages
-            [ "$bundled" = no ] && from=build/packages/extra
-            cp "$from/$name-$version.tar.zst" "dist/$asset"
-            ( cd dist && sha256sum "$asset" > "$asset.sha256" && cat "$asset.sha256" )
+            if ! grep -qx "$asset" have.txt; then
+              from=sq_android/assets/packages
+              [ "$bundled" = no ] && from=build/packages/extra
+              cp "$from/$name-$version.tar.zst" "dist/$asset"
+              ( cd dist && sha256sum "$asset" > "$asset.sha256" && cat "$asset.sha256" )
+            fi
+            cartridge=$name-$version-$key.sq
+            if ! grep -qx "$cartridge" have.txt; then
+              cp "build/packages/cartridges/$name-$version.sq" "dist/$cartridge"
+              ( cd dist && sha256sum "$cartridge" > "$cartridge.sha256" && cat "$cartridge.sha256" )
+            fi
           done < keys.txt
 
       - uses: actions/upload-artifact@v4
@@ -241,4 +265,22 @@ jobs:
             done < keys.txt
           } > index
           cat index
-          gh release upload "$RELEASE" index --clobber
+          # The same for the cartridges: index-3, which the pkg that reads
+          # .sq takes (the pkg already on phones reads `index`, the tarballs).
+          {
+            echo "sqterm release index 3"
+            while read -r name version key bundled; do
+              asset=$name-$version-$key.sq
+              if [ -f "dist/$asset.sha256" ]; then
+                cp "dist/$asset.sha256" shas/
+              else
+                gh release download "$RELEASE" -p "$asset.sha256" -D shas --clobber
+              fi
+              sha=$(cut -d ' ' -f 1 "shas/$asset.sha256")
+              [ ${#sha} -eq 64 ] || { echo "no sha256 for $asset" >&2; exit 1; }
+              needs=$(awk -v n="$name:" '$1 == n { $1 = ""; sub(/^ +/, ""); gsub(/ +/, ","); print }' packages/needs)
+              echo "$name $version $key $bundled $sha ${needs:--}"
+            done < keys.txt
+          } > index-3
+          cat index-3
+          gh release upload "$RELEASE" index index-3 --clobber

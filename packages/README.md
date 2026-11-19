@@ -49,6 +49,30 @@ sqdrive/          sqdrive 0.4.0 (MIT): the Virtual Cartridge Drive's tool, a
                   (not in the APK: pkg install sqdrive)
 ```
 
+## As cartridges (from 2026-11-19)
+
+Each package is also a squared cartridge, 3.0 (sqcart's spec, Appendix
+B.2: kind `package`), packed from the same install by
+`tools/pack_cartridges.sh` into `build/packages/cartridges/<name>-<version>.sq`
+(offline; not in any key). Its packer, `tools/cartridge` (`sqterm-pack`), is
+built for the build machine with sqcart's library (`third_party/sqcart`,
+copied by `tools/vendor_sqcart.sh`) and clang 23:
+
+- a file is an entry, flags `r`, and `x` when it was executable;
+- a symbolic link is no entry: the manifest's `consumers.sqterm.links` names
+  it and its target, for pkg to make (a cartridge holds no link);
+- the manifest is `format_version` 3, and `case_sensitive: true` when two
+  paths collide under case folding (the sysroot's Linux headers: a package
+  unpacks to `$PREFIX`, which does not fold case);
+- many small files are compressed with a zstd dictionary trained on them.
+
+CI publishes both forms, `<name>-<version>-<key>.tar.zst` and `.sq`, and two
+indexes: `index` (the tarballs, for the pkg already on phones) and `index-3`
+(the cartridges, for the pkg that reads them). The tarballs stop once that
+pkg is everywhere. All the bundled packages come to about 16% more as
+cartridges than as tarballs (each file compressed alone, against a tarball's
+one stream): 12.0 MB against 10.3 MB, without llvm and lldb.
+
 ## Getting them
 
 On the phone, in Termux, from sqterm's folder. Either CI's packages:
