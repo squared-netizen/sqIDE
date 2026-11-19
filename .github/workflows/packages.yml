@@ -134,10 +134,8 @@ jobs:
         with:
           path: |
             build/packages/*/key
-            build/packages/*/cartridge-key
             build/packages/*/dest
             build/packages/extra
-            build/packages/cartridges
             sq_android/assets/packages
           key: package-builds-${{ github.run_id }}
           restore-keys: package-builds-
@@ -173,6 +171,10 @@ jobs:
           clang --version | head -n 1
           bash packages/build.sh
 
+      # Packed afresh on every run (a minute), not cached: a cache is tied
+      # to its exact list of paths, and a path added to the builds' cache
+      # would miss every cache before it, and rebuild everything (llvm:
+      # hours).
       - name: Each package as a cartridge too (offline)
         if: steps.plan.outputs.missing != ''
         run: bash tools/pack_cartridges.sh
@@ -183,10 +185,8 @@ jobs:
         with:
           path: |
             build/packages/*/key
-            build/packages/*/cartridge-key
             build/packages/*/dest
             build/packages/extra
-            build/packages/cartridges
             sq_android/assets/packages
           key: package-builds-${{ github.run_id }}
 
