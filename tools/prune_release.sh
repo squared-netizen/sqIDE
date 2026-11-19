@@ -8,7 +8,8 @@
 # CI adds an archive to the release for every key a package has had
 # (<name>-<version>-<key>.tar.zst), and never removes one: a recipe changed
 # ten times leaves ten. This keeps those the recipes in this folder ask for
-# (`bash packages/build.sh --keys`), and the `index` pkg reads, and nothing
+# (`bash packages/build.sh --keys`), as tarballs and as cartridges (.sq), and
+# the `index` and `index-3` pkg reads, and nothing
 # else, so run it from an up-to-date main: a checkout that is behind would
 # delete what main needs,
 # and one that is ahead would keep what main does not. It refuses to delete
@@ -45,10 +46,12 @@ if [ "$DELETE" = 1 ]; then
   [ -z "$(git -C "$ROOT" status --porcelain -- packages)" ] || fail "packages/ has changes not on main"
 fi
 
-# What the recipes ask for: <name>-<version>-<key>.tar.zst.
+# What the recipes ask for: <name>-<version>-<key>.tar.zst, and the same
+# package as a cartridge, .sq (the release carries both, 2026-11-19).
 declare -A wanted=()
 while read -r name version key _; do
   wanted["$name-$version-$key.tar.zst"]=1
+  wanted["$name-$version-$key.sq"]=1
 done < <(bash "$ROOT/packages/build.sh" --keys)
 [ ${#wanted[@]} -gt 0 ] || fail "no keys from packages/build.sh --keys"
 
@@ -60,8 +63,9 @@ kept=0 stale=0
 while read -r id asset; do
   [ -n "$id" ] || continue
   archive=${asset%.sha256}
-  # The index pkg reads (CI rewrites it on every run on main).
-  if [ -n "${wanted[$archive]:-}" ] || [ "$asset" = index ]; then
+  # The indexes pkg reads (CI rewrites them on every run on main): index
+  # for the tarballs, index-3 for the cartridges.
+  if [ -n "${wanted[$archive]:-}" ] || [ "$asset" = index ] || [ "$asset" = index-3 ]; then
     kept=$((kept + 1))
     continue
   fi
