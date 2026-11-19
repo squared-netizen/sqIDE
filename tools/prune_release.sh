@@ -40,9 +40,13 @@ esac
 command -v gh >/dev/null 2>&1 || fail "gh is missing (Termux: pkg install gh; gh auth login)"
 
 if [ "$DELETE" = 1 ]; then
+  # main as GitHub has it now, not as this checkout last fetched it: a
+  # checkout behind main does not know main's newest packages, and would
+  # delete them (2026-11-19: sqdrive's, uploaded minutes before).
   head=$(git -C "$ROOT" rev-parse HEAD)
-  main=$(git -C "$ROOT" rev-parse origin/main 2>/dev/null) || fail "no origin/main: git fetch first"
-  [ "$head" = "$main" ] || fail "HEAD is not origin/main: check out main and git pull first"
+  main=$(git -C "$ROOT" ls-remote origin refs/heads/main | cut -f 1)
+  [ -n "$main" ] || fail "cannot read main from origin"
+  [ "$head" = "$main" ] || fail "HEAD is not main as it is on GitHub ($main): check out main and git pull first"
   [ -z "$(git -C "$ROOT" status --porcelain -- packages)" ] || fail "packages/ has changes not on main"
 fi
 
