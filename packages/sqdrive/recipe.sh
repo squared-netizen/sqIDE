@@ -42,16 +42,21 @@ recipe_build() {
   # clang and clang++ for Android, as two scripts: the Makefiles take one
   # word for CXX (and make CC of it). -D__BIONIC_CTYPE_INLINE=inline, as the
   # sysroot's clang.cfg gives every compile: import std cannot export
-  # bionic's static inline ctype.
-  local tools=$here/tools flags="--target=$triple --sysroot=$sysroot -resource-dir=$rd -D__BIONIC_CTYPE_INLINE=inline"
+  # bionic's static inline ctype. The runtime libraries on every compile,
+  # not only the link: they decide target features (compiler-rt turns on
+  # outline atomics and function multiversioning), and a module compiled
+  # with others is refused (CI, 2026-11-19: apt.llvm.org's clang defaults
+  # to libgcc, so std.pcm had -fmv and the link's compile +outline-atomics).
+  local tools=$here/tools
+  local flags="--target=$triple --sysroot=$sysroot -resource-dir=$rd -rtlib=compiler-rt -unwindlib=libunwind -D__BIONIC_CTYPE_INLINE=inline"
   mkdir -p "$tools"
   printf '#!/bin/sh\nexec "%s" %s "$@"\n' "$bin/clang" "$flags" > "$tools/clang"
   printf '#!/bin/sh\nexec "%s" %s -nostdinc++ -isystem "%s" -isystem "%s" "$@"\n' "$bin/clang++" "$flags" \
     "$rt/include/$triple/c++/v1" "$rt/include/c++/v1" > "$tools/clang++"
   chmod +x "$tools/clang" "$tools/clang++"
   # The clone is read in place: everything is built in $out.
-  env -u CFLAGS -u CXXFLAGS -u CPPFLAGS make -j"$JOBS" BUILD="$out" CXX="$tools/clang++" OPT=-O2 STD_CPPM="$std" \
-    LDFLAGS="-stdlib=libc++ -static-libstdc++ -fuse-ld=lld -rtlib=compiler-rt -unwindlib=libunwind -L$rt/lib/$triple" \
+  env -u CFLAGS -u CXXFLAGS -u CPPFLAGS make -j"$JOBS" BUILD="$out" CXX="$tools/clang++" OPT=-O2 STD_MANIFEST= STD_CPPM="$std" \
+    LDFLAGS="-stdlib=libc++ -static-libstdc++ -fuse-ld=lld -L$rt/lib/$triple" \
     "$out/sqdrive"
   mkdir -p "$dest$SQ_PREFIX/bin"
   cp "$out/sqdrive" "$dest$SQ_PREFIX/bin/sqdrive"
