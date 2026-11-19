@@ -18,10 +18,10 @@
 //                                    name), what they need, which are installed
 //   pkg install NAME [--consume]     by name: the index's, and what it needs
 //                                    first; a name no index knows, the newest
-//                                    NAME-<version>-*.tar.zst (or .tar) in the
+//                                    NAME-<version>-*.sq (or .tar.zst, .tar) in the
 //                                    packages folder, then Download
-//   pkg install FILE [--consume]     a package from a file (.tar.zst, or the
-//                                    .tar pkg backup writes); --consume
+//   pkg install FILE [--consume]     a package from a file (.sq, .tar.zst, or
+//                                    the .tar pkg backup writes); --consume
 //                                    deletes FILE once it is installed
 //   pkg remove NAME [--force]        its files, then its record; refused while
 //                                    an installed package needs it
@@ -95,6 +95,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <optional>
@@ -273,13 +274,17 @@ struct Available {
     std::string sha256;
     bool bundled = true;             ///< in the APK as well
     std::vector<std::string> needs;  ///< what it needs at run time, installed first
+    bool cartridge = false;          ///< a squared cartridge (.sq), else a tarball
 
-    std::string asset() const { return name + "-" + version + "-" + key + ".tar.zst"; }
+    std::string asset() const { return name + "-" + version + "-" + key + (cartridge ? ".sq" : ".tar.zst"); }
 };
 
-/// Index versions: 1 (no needs), 2 (a sixth field: needs, comma-separated, or -).
+/// Index versions: 1 (no needs), 2 (a sixth field: needs, comma-separated,
+/// or -), 3 (the same, its archives cartridges, .sq: the release's index-3;
+/// pkg's own merged index marks a tarball with a seventh field, "tar").
 constexpr std::string_view index_header_1 = "sqterm release index 1";
 constexpr std::string_view index_header_2 = "sqterm release index 2";
+constexpr std::string_view index_header_3 = "sqterm release index 3";
 
 /// The index pkg last settled on (pkg update), all sources merged.
 std::string index_path() { return prefix + "/var/lib/sqterm/release-index"; }
@@ -336,6 +341,7 @@ std::optional<std::vector<Available>> parse_index(const std::string& text, std::
     std::vector<Available> out;
     std::size_t at = 0;
     std::size_t fields = 0;  // 5 or 6, from the header
+    bool three = false;
     while (at < text.size()) {
         std::size_t end = text.find('\n', at);
         if (end == std::string::npos) end = text.size();
@@ -346,6 +352,9 @@ std::optional<std::vector<Available>> parse_index(const std::string& text, std::
                 fields = 5;
             } else if (line == index_header_2) {
                 fields = 6;
+            } else if (line == index_header_3) {
+                fields = 6;
+                three = true;
             } else {
                 error = "not a package index (its first line: " + line.substr(0, 40) + ")";
                 return std::nullopt;
@@ -360,11 +369,14 @@ std::optional<std::vector<Available>> parse_index(const std::string& text, std::
             f.push_back(line.substr(from, space - from));
             from = space + 1;
         }
+        // Index 3: a seventh field "tar" marks a tarball in pkg's own index.
+        const bool tar = three && f.size() == 7 && f[6] == "tar";
+        if (tar) f.pop_back();
         bool good = f.size() == fields && good_name(f[0]) && !f[1].empty() && f[1][0] >= '0' &&
                     f[1][0] <= '9' && good_name(f[1]) && hex_of(f[2], 16) && (f[3] == "yes" || f[3] == "no") &&
                     hex_of(f[4], 64);
         Available a{f.size() > 0 ? f[0] : "", f.size() > 1 ? f[1] : "", f.size() > 2 ? f[2] : "",
-                    f.size() > 4 ? f[4] : "", f.size() > 3 && f[3] == "yes", {}};
+                    f.size() > 4 ? f[4] : "", f.size() > 3 && f[3] == "yes", {}, three && !tar};
         if (good && fields == 6 && f[5] != "-") {
             for (std::size_t from = 0; from <= f[5].size();) {
                 std::size_t comma = f[5].find(',', from);
@@ -389,12 +401,12 @@ std::optional<std::vector<Available>> parse_index(const std::string& text, std::
 }
 
 std::string format_index(const std::vector<Available>& index) {
-    std::string text = std::string(index_header_2) + "\n";
+    std::string text = std::string(index_header_3) + "\n";
     for (const Available& a : index) {
         std::string needs;
         for (const std::string& n : a.needs) needs += (needs.empty() ? "" : ",") + n;
         text += a.name + " " + a.version + " " + a.key + " " + (a.bundled ? "yes" : "no") + " " + a.sha256 + " " +
-                (needs.empty() ? "-" : needs) + "\n";
+                (needs.empty() ? "-" : needs) + (a.cartridge ? "" : " tar") + "\n";
     }
     return text;
 }
@@ -602,14 +614,19 @@ std::optional<std::vector<Available>> refresh_index(std::string& error, bool qui
     std::optional<std::vector<Available>> release;
     std::string offline = "--from sqterm";
     if (from != Source::sqterm) {
+        // index-3 (the cartridges) first; a release from before it has only
+        // index (the tarballs).
         const std::string part = index_path() + ".download";
-        const std::string url = release_base() + "/index";
-        if (const int status = curl_to(url, part, false); status == 0) {
-            release = read_index(part, offline);
-        } else {
-            offline = curl_failed(status, url);
+        for (const char* name : {"index-3", "index"}) {
+            const std::string url = release_base() + "/" + name;
+            if (const int status = curl_to(url, part, false); status == 0) {
+                release = read_index(part, offline);
+            } else {
+                offline = curl_failed(status, url);
+            }
+            ::unlink(part.c_str());
+            if (release) break;
         }
-        ::unlink(part.c_str());
         if (from == Source::repo && !release) {
             error = offline;
             return std::nullopt;
@@ -713,13 +730,13 @@ int cmd_files(std::string_view name) {
     return 0;
 }
 
-/// NAME-<version>[-key].tar.zst or .tar: the version starts with a digit, so
-/// zsh never matches zsh-autosuggestions-0.7.1.tar.zst.
+/// NAME-<version>[-key].sq, .tar.zst or .tar: the version starts with a
+/// digit, so zsh never matches zsh-autosuggestions-0.7.1.tar.zst.
 bool archive_of(std::string_view file, std::string_view name) {
     if (!file.starts_with(name) || file.size() <= name.size() + 1 || file[name.size()] != '-') return false;
     const char next = file[name.size() + 1];
     if (next < '0' || next > '9') return false;
-    return file.ends_with(".tar.zst") || file.ends_with(".tar");
+    return file.ends_with(".sq") || file.ends_with(".tar.zst") || file.ends_with(".tar");
 }
 
 /// The newest NAME archive in a folder, by time; empty if none.
@@ -748,8 +765,9 @@ int cmd_install(const std::string& file, bool consume, std::string* id = nullptr
     const std::string incoming = records + "/.incoming";
     remove_tree(incoming);
     std::array<char, 512> error{};
-    if (sqterm::unpack_archive(file.c_str(), prefix.c_str(), incoming.c_str(), error.data(),
-                       error.size()) != 0) {
+    // A cartridge (.sq) through sqcart's reader; a tarball through unpack.cpp.
+    const auto unpack = file.ends_with(".sq") ? sqterm::unpack_cartridge : sqterm::unpack_archive;
+    if (unpack(file.c_str(), prefix.c_str(), incoming.c_str(), error.data(), error.size()) != 0) {
         remove_tree(incoming);
         const std::string_view said(error.data());
         if ((said.find("Permission denied") != std::string_view::npos ||

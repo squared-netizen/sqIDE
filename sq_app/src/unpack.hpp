@@ -16,4 +16,11 @@ namespace sqterm {
 int unpack_archive(const char* archive, const char* prefix, const char* meta, char* error,
                    unsigned long error_size);
 
+/// Unpack a package that is a squared cartridge, `archive` (a .sq), into
+/// `prefix` (unpack_cartridge.cpp): its files, with mode 0755 where its
+/// flags have x, and the symbolic links its manifest names; the manifest
+/// to `meta`, as manifest.json. The same result and error as unpack_archive.
+int unpack_cartridge(const char* archive, const char* prefix, const char* meta, char* error,
+                     unsigned long error_size);
+
 }  // namespace sqterm

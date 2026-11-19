@@ -68,7 +68,11 @@ copied by `tools/vendor_sqcart.sh`) and clang 23:
 
 CI publishes both forms, `<name>-<version>-<key>.tar.zst` and `.sq`, and two
 indexes: `index` (the tarballs, for the pkg already on phones) and `index-3`
-(the cartridges, for the pkg that reads them). The tarballs stop once that
+(the cartridges). pkg reads `index-3` first, and installs a `.sq` through
+sqcart's reader (`sq_app/src/unpack_cartridge.cpp`): each file verified as it
+is read, mode 0755 where its flags have `x`, the manifest's links made last,
+none that would leave the prefix. It still installs a tarball (`index`, the
+packages folder's index, `pkg backup`'s `.tar`). The tarballs stop once that
 pkg is everywhere. All the bundled packages come to about 16% more as
 cartridges than as tarballs (each file compressed alone, against a tarball's
 one stream): 12.0 MB against 10.3 MB, without llvm and lldb.
