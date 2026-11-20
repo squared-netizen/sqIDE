@@ -196,21 +196,35 @@ fetch_get() {
 # build/packages/sources/NAME-TAG.git. Its commit is checked against
 # packages/sources.lock ("NAME@TAG COMMIT"), or recorded there on the first
 # fetch, as a sha256 is for a file (SQ_LOCKED=1 refuses to record).
+# Folders after the tag make it a sparse clone of those folders alone, their
+# files fetched as they are checked out (a recipe's `also`: a few folders of
+# a large repository).
 fetch_git() {
   local name=$1 repo=$2 tag=$3 dir expected actual
+  shift 3
   need git git
   dir=$SOURCES/$name-$tag.git
   expected=$(awk -v g="$name@$tag" '$1 == g { print $2 }' "$LOCK" 2>/dev/null)
   if [ -d "$dir/.git" ] && [ -n "$expected" ] && [ "$(git -C "$dir" rev-parse HEAD)" = "$expected" ]; then
+    # The folders a recipe asks for may have changed since the clone.
+    if [ $# -gt 0 ] && [ "$DRY" != 1 ]; then
+      git -C "$dir" sparse-checkout set -- "$@" || fail "$name: could not check out $* of $repo"
+    fi
     say have "$name@$tag"
     return
   fi
-  if [ "$DRY" = 1 ]; then say would "$name@$tag ($repo)"; return; fi
+  if [ "$DRY" = 1 ]; then say would "$name@$tag ($repo${*:+: $*})"; return; fi
   rm -rf "$dir"
   mkdir -p "$SOURCES"
-  say clone "$repo $tag"
-  git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$repo" "$dir" ||
-    fail "$name: could not clone $repo at $tag"
+  say clone "$repo $tag${*:+ ($*)}"
+  if [ $# -gt 0 ]; then
+    git -c advice.detachedHead=false clone -q --depth 1 --filter=blob:none --sparse --branch "$tag" "$repo" "$dir" &&
+      git -C "$dir" sparse-checkout set -- "$@" ||
+      fail "$name: could not clone $* of $repo at $tag"
+  else
+    git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$repo" "$dir" ||
+      fail "$name: could not clone $repo at $tag"
+  fi
   actual=$(git -C "$dir" rev-parse HEAD)
   if [ -z "$expected" ] && [ "${SQ_LOCKED:-0}" = 1 ]; then
     rm -rf "$dir"
@@ -226,10 +240,21 @@ fetch_git() {
 }
 
 fetch_source() {
-  local name=$1 version= url= mirrors= sha256= file= git= tag= from got=0 actual expected
+  local name=$1 version= url= mirrors= sha256= file= git= tag= also= from got=0 actual expected
+  local sub repo dirs
   # The recipe's source fields only; its functions are not run.
   . "$RECIPES/$name/recipe.sh"
-  if [ -n "$git" ]; then fetch_git "$name" "$git" "$tag"; return; fi
+  if [ -n "$git" ]; then
+    fetch_git "$name" "$git" "$tag"
+    # `also`: more repositories at the same tag, a line each: "SUB URL
+    # FOLDER...", cloned as NAME.SUB.
+    while read -r sub repo dirs; do
+      [ -n "$sub" ] || continue
+      # shellcheck disable=SC2086  # the folders, a word each
+      fetch_git "$name.$sub" "$repo" "$tag" $dirs
+    done <<< "$also"
+    return
+  fi
   if [ -z "$file" ]; then say local "$name (built from this repository)"; return; fi
   local path=$SOURCES/$file
   expected=$sha256
