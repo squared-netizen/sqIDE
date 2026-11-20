@@ -4,9 +4,12 @@
 version=1.3.1
 license=Zlib
 file=zlib-$version.tar.gz
-url=https://zlib.net/fossils/$file
-mirrors="https://github.com/madler/zlib/releases/download/v$version/$file"
-sha256=
+# The GitHub release first: zlib.net/fossils once served another file under
+# this name (CI, 2026-11-20: a sha256 not the release's), which the lock
+# refused.
+url=https://github.com/madler/zlib/releases/download/v$version/$file
+mirrors="https://zlib.net/fossils/$file"
+sha256=9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
 top=zlib-$version
 depends=
 bundled=no
