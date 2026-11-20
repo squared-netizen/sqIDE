@@ -1,4 +1,4 @@
-# sqdrive 0.4.0: the Virtual Cartridge Drive's tool, MIT. Reads and writes
+# sqdrive 0.5.0: the Virtual Cartridge Drive's tool, MIT. Reads and writes
 # the files of a squared cartridge (sqcart 3.0) by range: ls, stat, cat,
 # bench, write, truncate, rm, mv, commit, recover. Its journals go in
 # ~/.local/state/sqdrive (or $SQDRIVE_STAGING).
@@ -13,7 +13,7 @@
 # Monocypher and squared's sq.data are vendored in its repository: nothing
 # else to download. A git source: the tag's commit is in sources.lock.
 
-version=0.4.0
+version=0.5.0
 license=MIT
 git=https://github.com/squared-netizen/sqdrive
 tag=v$version

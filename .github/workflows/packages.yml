@@ -112,6 +112,19 @@ jobs:
           sudo apt-get install -y --no-install-recommends clang-23 lld-23 llvm-23 libc++-23-dev libc++abi-23-dev
           /usr/lib/llvm-23/bin/clang --version | head -n 1
 
+      # squared's build/toolchain.sh (pkg's build, and squared's) does its
+      # text work with sqedit: built for this machine first, at the tag its
+      # recipe pins.
+      - name: sqedit for this machine
+        if: steps.plan.outputs.missing != ''
+        run: |
+          set -euo pipefail
+          tag=$(bash -c '. packages/sqedit/recipe.sh; echo $tag')
+          git clone --quiet --depth 1 --branch "$tag" https://github.com/squared-netizen/sqedit "$RUNNER_TEMP/sqedit"
+          make -C "$RUNNER_TEMP/sqedit" -j4 CXX=/usr/lib/llvm-23/bin/clang++ CC=/usr/lib/llvm-23/bin/clang \
+            AR=/usr/lib/llvm-23/bin/llvm-ar build/sqedit
+          echo "$RUNNER_TEMP/sqedit/build" >> "$GITHUB_PATH"
+
       - name: Compiler cache (kept even when a run fails)
         if: steps.plan.outputs.missing != ''
         uses: actions/cache/restore@v4

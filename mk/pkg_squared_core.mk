@@ -12,6 +12,8 @@
 # is why this fragment is include paths plus a link line rather than a source
 # list.
 
+SQEDIT ?= sqedit
+
 # The package installs the framework tree at squared/ in the project root.
 SQ_SQUARED_DIR ?= squared
 
@@ -153,13 +155,13 @@ SQ_CPPFLAGS += $(SQ_TELEGRAPH_SIZES)
 # console` finds them without being told which kind of build is installed.
 SQ_BRIDGE_CONF := $(BUILD)/dev/bridge.conf
 ifneq ($(CONSOLE),0)
-  SQ_BRIDGE_PORT := $(shell printf '%s' '$(SQ_PACKAGE)' | cksum | awk '{ print 20000 + $$1 % 20000 }')
+  SQ_BRIDGE_PORT := $(shell n=$$(printf '%s' '$(SQ_PACKAGE)' | cksum | $(SQEDIT) pick -x '{%d+} .*'); echo $$((20000 + n % 20000)))
   $(shell mkdir -p '$(BUILD)/dev'; \
-    grep -qx 'port=$(SQ_BRIDGE_PORT)' '$(SQ_BRIDGE_CONF)' 2>/dev/null || { \
+    $(SQEDIT) match -qxF 'port=$(SQ_BRIDGE_PORT)' '$(SQ_BRIDGE_CONF)' 2>/dev/null || { \
       secret=$$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n'); \
       printf 'port=%s\nsecret=%s\npackage=%s\n' '$(SQ_BRIDGE_PORT)' "$$secret" '$(SQ_PACKAGE)' \
         > '$(SQ_BRIDGE_CONF)'; })
-  SQ_BRIDGE_SECRET := $(shell sed -n 's/^secret=//p' '$(SQ_BRIDGE_CONF)')
+  SQ_BRIDGE_SECRET := $(shell $(SQEDIT) pick -x '"secret=" {.*}' '$(SQ_BRIDGE_CONF)')
   ifneq ($(words $(SQ_BRIDGE_SECRET)) $(shell printf '%s' '$(SQ_BRIDGE_SECRET)' | wc -c | tr -d ' '),1 32)
     $(error the bridge secret in $(SQ_BRIDGE_CONF) is not 32 hex digits; delete the file and build again)
   endif
@@ -194,7 +196,7 @@ console: $(SQ_SQCONSOLE)
 	  echo "  make dev   (CONSOLE=app DEV_LOG=1 install), or: make dev console" >&2; exit 1; \
 	fi
 	@if [ -n '$(SQ_FLAGS_STAMP)' ] && [ -f '$(SQ_FLAGS_STAMP)' ] && \
-	   ! grep -q 'SQUARED_CONSOLE=' '$(SQ_FLAGS_STAMP)'; then \
+	   ! $(SQEDIT) match -qF 'SQUARED_CONSOLE=' '$(SQ_FLAGS_STAMP)'; then \
 	  echo "make console: the last build here has no Console. Make one and install it:" >&2; \
 	  echo "  make dev   (CONSOLE=app DEV_LOG=1 install), or: make dev console" >&2; exit 1; \
 	fi
@@ -283,7 +285,12 @@ SQ_SQUARED_INC := -I$(SQ_SQUARED_DIR)/..
 # with (Android's ctype functions plain inline, not static: the std module
 # exports them). CPPFLAGS, not SQ_CPPFLAGS: the NDK's native-app-glue is C,
 # and imports nothing.
-SQ_SQUARED_BMI_DIR := $(SQ_SQUARED_DIR)/build/release/modules
+# The framework's build folder, as build/common.mk names it: release, or with
+# the SDK's toolchain (SQ_TOOLCHAIN=1) release-<its fingerprint>, so that its
+# BMIs never meet another toolchain's (SQ_TOOLCHAIN_FINGERPRINT is
+# build/toolchain.mk's, which mk/squared_generated.mk has included).
+SQ_SQUARED_BUILD_DIR := $(SQ_SQUARED_DIR)/build/release$(if $(filter 1,$(SQ_TOOLCHAIN)),-$(SQ_TOOLCHAIN_FINGERPRINT))
+SQ_SQUARED_BMI_DIR := $(SQ_SQUARED_BUILD_DIR)/modules
 CPPFLAGS += -pthread -D__BIONIC_CTYPE_INLINE=inline -fprebuilt-module-path=$(SQ_SQUARED_BMI_DIR)
 
 # Your objects are compiled after the framework's BMIs, and again when one
@@ -308,7 +315,7 @@ $(SQ_SQUARED_BMIS): squared-core ;
 # nothing of theirs: an archive's member comes in only when something refers
 # to it. (Since 7b.4 each archive also holds its module's interfaces: what an
 # importer calls, and each module's initializer.)
-SQ_SQUARED_LIB_DIR := $(SQ_SQUARED_DIR)/build/release/lib
+SQ_SQUARED_LIB_DIR := $(SQ_SQUARED_BUILD_DIR)/lib
 SQ_SQUARED_LIBS := \
   $(SQ_SQUARED_LIB_DIR)/libsquared.a \
   $(if $(filter-out 0,$(CONSOLE)),$(SQ_SQUARED_LIB_DIR)/libsquared_console.a,) \

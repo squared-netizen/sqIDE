@@ -82,6 +82,12 @@ SQ_MIN_SDK ?= $(if $(filter 1,$(SQ_TOOLCHAIN)),28,22)
 SQ_TARGET_SDK ?= 28
 SQ_STORED ?= ttf otf ttc zst
 
+# The APK is packed and signed by apkpack (its package is in the prefix):
+# no Java and no Android SDK. Its key is ~/.android/apkpack.pem, made the
+# first time; an sqterm signed by the SDK's debug key is uninstalled once
+# before this one installs. SQ_PACKER=sdk packs it with aapt2 and apksigner.
+SQ_PACKER ?= apkpack
+
 # sqterm keeps running in the background while a shell runs (12.6), as
 # Termux does: squared's foreground service, its notification (Exit, Acquire
 # / Release wakelock), packed by BACKGROUND=1 (mk/squared_android_package.mk).
@@ -112,7 +118,9 @@ SQ_SO := $(BUILD)/lib$(SQ_PROJECT).so
 
 # Your code, plus the platform layer, plus the NDK's native-app-glue. The build
 # globs; there is no source list to keep in sync.
-APP_SRC  := $(shell find sq_app/src -name '*.cpp' 2>/dev/null | sort)
+# unpack_cartridge.cpp is pkg's (packages/pkg/recipe.sh builds it with
+# sqcart's reader, sq.cart): the app does not call it, and has no sq.cart.
+APP_SRC  := $(filter-out sq_app/src/unpack_cartridge.cpp,$(shell find sq_app/src -name '*.cpp' 2>/dev/null | sort))
 PLAT_SRC := $(shell find sq_android -maxdepth 1 -name '*.cpp' 2>/dev/null | sort)
 CXX_SRC  := $(APP_SRC) $(PLAT_SRC) $(SQ_KIT_SRC)
 # C code sqterm carries from elsewhere: zstd's decoder, for the packages (12.5).
@@ -187,7 +195,7 @@ $(SQ_SO): $(OBJ) $(SQ_SQUARED_LIBS)
 # supplied a path for it — which would mean something reintroduced -lEGL.
 .PHONY: verify-link
 verify-link:
-	@needed=$$(readelf -d $(SQ_SO) 2>/dev/null | sed -n 's/.*NEEDED.*\[\(.*\)\]/\1/p' | tr '\n' ' '); \
+	@needed=$$(readelf -d $(SQ_SO) 2>/dev/null | $(SQEDIT) pick '"Shared library: [" {[^]]+} "]"' | tr '\n' ' '); \
 	case "$$needed" in \
 	  *libEGL*|*libGLES*) \
 	    if [ -z "$(strip $(SQ_GL_LIBS))" ]; then \
@@ -205,14 +213,14 @@ verify-link:
 	    echo "  The C++ runtime should be linked in; is SQ_CXX_RUNTIME empty? (make android-status)" >&2; \
 	    exit 1 ;; \
 	esac; \
-	if [ "$(SQ_MIN_SDK)" -lt 23 ] && ! readelf -d $(SQ_SO) 2>/dev/null | grep -q '(HASH)'; then \
+	if [ "$(SQ_MIN_SDK)" -lt 23 ] && ! readelf -d $(SQ_SO) 2>/dev/null | $(SQEDIT) match -qF '(HASH)'; then \
 	  echo "" >&2; \
 	  echo "link check: lib$(SQ_PROJECT).so has no DT_HASH table; Android before 6.0 cannot load it." >&2; \
 	  echo "  The link needs -Wl,--hash-style=both (SQ_LDFLAGS in mk/squared_generated.mk)." >&2; \
 	  exit 1; \
 	fi; \
 	echo "  link check     $$needed"; \
-	echo "                 built for API $(SQ_MIN_SDK); C++ runtime linked in$$(readelf -d $(SQ_SO) 2>/dev/null | grep -q '(HASH)' && echo '; DT_HASH present')"
+	echo "                 built for API $(SQ_MIN_SDK); C++ runtime linked in$$(readelf -d $(SQ_SO) 2>/dev/null | $(SQEDIT) match -qF '(HASH)' && echo '; DT_HASH present')"
 
 $(BUILD)/%.o: %.cpp $(SQ_FLAGS_STAMP)
 	@mkdir -p $(dir $@)

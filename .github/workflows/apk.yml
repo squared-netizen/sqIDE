@@ -6,8 +6,10 @@
 #
 # What it shows: the native library and the APK build, link only against
 # what an app may (libc, libm, libdl, libandroid, liblog, libEGL,
-# libGLESv3), and carry the C++ runtime inside. Installing and starting it
-# is the phone's part (make dev).
+# libGLESv3), and carry the C++ runtime inside; packed and signed by
+# apkpack, with no Java and no Android SDK, and the build's text work done
+# by sqedit (both built here first, at the tags their recipes pin).
+# Installing and starting it is the phone's part (make dev).
 name: apk
 
 on:
@@ -21,6 +23,8 @@ on:
       - squared/**
       - packages/sysroot/**
       - packages/runtimes/**
+      - packages/apkpack/**
+      - packages/sqedit/**
       - .github/workflows/apk.yml
   pull_request:
     paths:  # the same list as push
@@ -31,6 +35,8 @@ on:
       - squared/**
       - packages/sysroot/**
       - packages/runtimes/**
+      - packages/apkpack/**
+      - packages/sqedit/**
       - .github/workflows/apk.yml
   workflow_dispatch:
 
@@ -51,7 +57,8 @@ jobs:
           curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
           echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm-23.list
           sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends clang-23 lld-23 llvm-23 zstd
+          sudo apt-get install -y --no-install-recommends clang-23 lld-23 llvm-23 zstd \
+            libc++-23-dev libc++abi-23-dev
           echo "/usr/lib/llvm-23/bin" >> "$GITHUB_PATH"
 
       - name: sysroot and runtimes, from the release
@@ -73,10 +80,18 @@ jobs:
             echo "SQ_LLVM_BIN=/usr/lib/llvm-23/bin"
           } >> "$GITHUB_ENV"
 
-      - name: Android SDK tools (aapt2, apksigner; no NDK)
+      - name: sqedit and apkpack for this machine, at their recipes' tags
         run: |
-          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
-          echo "$bt" >> "$GITHUB_PATH"
+          set -euo pipefail
+          for name in sqedit apkpack; do
+            tag=$(bash -c ". packages/$name/recipe.sh; echo \$tag")
+            git clone --quiet --depth 1 --branch "$tag" "https://github.com/squared-netizen/$name" "$RUNNER_TEMP/$name"
+            make -C "$RUNNER_TEMP/$name" -j4 CXX=clang++ CC=clang AR=llvm-ar "build/$name"
+            echo "$RUNNER_TEMP/$name/build" >> "$GITHUB_PATH"
+          done
+
+      - name: No NDK, no Android SDK tools
+        run: |
           echo "ANDROID_NDK_HOME=" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=" >> "$GITHUB_ENV"
           echo "ANDROID_NDK=" >> "$GITHUB_ENV"
@@ -89,7 +104,8 @@ jobs:
           sudo mv "$ANDROID_HOME/ndk" "$RUNNER_TEMP/ndk-hidden" 2>/dev/null || true
           clang --version | head -n 1
           make -j4 SQ_TOOLCHAIN=1 status 2>&1 | tail -n 30 || true
-          make -j4 SQ_TOOLCHAIN=1 ANDROID_HOME="$ANDROID_HOME" apk
+          make -j4 SQ_TOOLCHAIN=1 apk
+          apkpack verify build/sqterm.apk
 
       - name: What it links
         run: |
