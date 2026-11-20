@@ -60,6 +60,9 @@ NO_REGEX = NeedsStartEnd
 # bionic declares sync_file_range only for _GNU_SOURCE builds at API 26 and
 # later; git falls back to fsync without it.
 HAVE_SYNC_FILE_RANGE =
+# bionic's libc has pthreads and clock_gettime: no libpthread or librt.
+PTHREAD_LIBS =
+NEEDS_LIBRT =
 CURL_LDFLAGS = -lcurl -lmbedtls -lmbedx509 -lmbedcrypto
 CURL_CFLAGS =
 MAK
