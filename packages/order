@@ -1,5 +1,4 @@
 # The packages, in the order they build and install (packages/build.sh).
-pkg
 ncurses
 zsh
 zsh-autosuggestions
@@ -15,6 +14,7 @@ curl
 llvm
 sysroot
 runtimes
+pkg
 llvm-tools
 lldb
 sqdrive
