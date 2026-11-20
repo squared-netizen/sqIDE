@@ -140,9 +140,9 @@ recipe_build() {
     echo "$d" | grep -E 'NEEDED' | grep -vE '\[(libc|libm|libdl|libc\+\+_shared|liblldb)\.so(\.1)?\]' &&
       { echo "$p needs a library sqterm has not" >&2; return 1; }
   done
-  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/lldb" | grep -q 'Shared library: \[liblldb\.so\]'
-  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/lib/liblldb.so" | grep -q 'Shared library: \[libc++_shared\.so\.1\]'
-  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/lldb" | grep -q "RUNPATH.*\[$SQ_PREFIX/lib\]"
+  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/lldb" | grep 'Shared library: \[liblldb\.so\]' >/dev/null
+  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/lib/liblldb.so" | grep 'Shared library: \[libc++_shared\.so\.1\]' >/dev/null
+  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/lldb" | grep "RUNPATH.*\[$SQ_PREFIX/lib\]" >/dev/null
   echo "lldb: links against liblldb and libc++_shared.so.1"
 }
 

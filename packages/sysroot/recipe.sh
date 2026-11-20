@@ -156,7 +156,7 @@ recipe_build() {
   # machine's clang, its own runtime), and needs only the device's libc.
   printf '#include <stdio.h>\nint main(void) { puts("hello from the sysroot"); return 0; }\n' > hello.c
   "$clang" --target="aarch64-linux-android$SQ_API" --sysroot="$root" -fuse-ld=lld hello.c -o hello
-  llvm-readelf -d hello | grep -q 'Shared library: \[libc.so\]'
+  llvm-readelf -d hello | grep 'Shared library: \[libc.so\]' >/dev/null
   echo "hello: links against the sysroot"
 
   # And an Android app's: every header squared's app includes, and every
@@ -183,7 +183,7 @@ void ANativeActivity_onCreate(ANativeActivity* a, void* state, size_t size) {
 C
   "$clang" --target="aarch64-linux-android$SQ_API" --sysroot="$root" -fuse-ld=lld -shared -fPIC \
     app.c -o libapp.so -landroid -llog -lEGL -lGLESv3
-  llvm-readelf -d libapp.so | grep -q 'Shared library: \[libandroid.so\]'
+  llvm-readelf -d libapp.so | grep 'Shared library: \[libandroid.so\]' >/dev/null
   echo "libapp.so: an Android app links against the sysroot"
 }
 

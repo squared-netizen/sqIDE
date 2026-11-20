@@ -124,9 +124,9 @@ recipe_build() {
   "${cxx[@]}" -fmodule-file=std=../std.pcm ../hello_std.cpp ../std.o -o ../hello_std
   "$bin/llvm-readelf" -d ../hello_std | grep 'NEEDED'
   local shared=$here_prefix/lib/$triple/libc++_shared.so
-  "$bin/llvm-readelf" -d "$shared" | grep -q 'Library soname: \[libc++_shared.so.1\]'
+  "$bin/llvm-readelf" -d "$shared" | grep 'Library soname: \[libc++_shared.so.1\]' >/dev/null
   "${cxx[@]/-static-libstdc++/-nostdlib++}" ../hello.cpp -lc++_shared -o ../hello_shared
-  "$bin/llvm-readelf" -d ../hello_shared | grep -q 'Shared library: \[libc++_shared.so.1\]'
+  "$bin/llvm-readelf" -d ../hello_shared | grep 'Shared library: \[libc++_shared.so.1\]' >/dev/null
   echo "runtimes: hello and import std link; hello_shared needs libc++_shared.so.1"
 }
 

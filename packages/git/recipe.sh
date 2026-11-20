@@ -70,7 +70,7 @@ MAK
   make SHELL=/bin/sh install DESTDIR="$dest"
   # What it was built with, each check saying so when it fails.
   local g=$dest$SQ_PREFIX/bin/git
-  llvm-readelf -h "$g" | grep -q AArch64 || { echo "git: not an arm64 program" >&2; return 1; }
+  llvm-readelf -h "$g" | grep AArch64 >/dev/null || { echo "git: not an arm64 program" >&2; return 1; }
   [ -e "$dest$SQ_PREFIX/libexec/git-core/git-remote-https" ] ||
     { echo "git: no git-remote-https" >&2; ls "$dest$SQ_PREFIX/libexec/git-core" | head -50 >&2; return 1; }
   if llvm-readelf -d "$g" | grep NEEDED | grep -qE 'curl|mbed|libz'; then
