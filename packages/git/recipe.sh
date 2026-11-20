@@ -57,6 +57,9 @@ NO_OPENSSL = YesPlease
 NO_INSTALL_HARDLINKS = YesPlease
 INSTALL_SYMLINKS = YesPlease
 NO_REGEX = NeedsStartEnd
+# bionic declares sync_file_range only for _GNU_SOURCE builds at API 26 and
+# later; git falls back to fsync without it.
+HAVE_SYNC_FILE_RANGE =
 CURL_LDFLAGS = -lcurl -lmbedtls -lmbedx509 -lmbedcrypto
 CURL_CFLAGS =
 MAK
