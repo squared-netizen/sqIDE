@@ -43,10 +43,16 @@ bash/ coreutils/ sed/ grep/ gawk/ make/
                   (awk), make 4.4.1 (recipes run under /system/bin/sh). No findutils:
                   its gnulib wants mktime_z (bionic: API 35); Android's own
                   find and xargs (toybox, /system/bin) serve
-sqdrive/          sqdrive 0.4.0 (MIT): the Virtual Cartridge Drive's tool, a
+sqdrive/          sqdrive 0.5.0 (MIT): the Virtual Cartridge Drive's tool, a
                   cartridge's files read and written by range; C++23 modules,
                   built by clang 23 against the sysroot and runtimes packages
                   (not in the APK: pkg install sqdrive)
+apkpack/          apkpack 0.2.0 (MIT): the APK built and signed with no Java
+                  and no Android SDK (make's SQ_PACKER=apkpack); C++23
+                  modules, built as sqdrive is
+sqedit/           sqedit 0.1.0 (MIT): the text tool squared's build and
+                  sqterm's scripts use in place of sed, grep and awk; C++23
+                  modules, built as sqdrive is
 ```
 
 ## As cartridges (from 2026-11-19)

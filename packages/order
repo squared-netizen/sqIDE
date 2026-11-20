@@ -20,3 +20,5 @@ pkg
 llvm-tools
 lldb
 sqdrive
+apkpack
+sqedit
