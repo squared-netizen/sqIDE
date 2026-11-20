@@ -68,15 +68,25 @@ CURL_CFLAGS =
 MAK
   make -j"$JOBS" SHELL=/bin/sh all
   make SHELL=/bin/sh install DESTDIR="$dest"
-  # What it was built with: one program for the target, with HTTPS.
+  # What it was built with, each check saying so when it fails.
   local g=$dest$SQ_PREFIX/bin/git
-  llvm-readelf -h "$g" | grep -q AArch64
-  [ -x "$dest$SQ_PREFIX/libexec/git-core/git-remote-https" ]
-  ! llvm-readelf -d "$g" | grep NEEDED | grep -qE 'curl|mbed|libz'
+  llvm-readelf -h "$g" | grep -q AArch64 || { echo "git: not an arm64 program" >&2; return 1; }
+  [ -e "$dest$SQ_PREFIX/libexec/git-core/git-remote-https" ] ||
+    { echo "git: no git-remote-https" >&2; ls "$dest$SQ_PREFIX/libexec/git-core" | head -50 >&2; return 1; }
+  if llvm-readelf -d "$g" | grep NEEDED | grep -qE 'curl|mbed|libz'; then
+    echo "git: needs a shared curl, mbedtls or zlib" >&2; return 1
+  fi
   # The phone's shell, not the build machine's: in git (run-command, aliases
   # with !) and in its scripts' first lines.
-  grep -q "$SQ_PREFIX/bin/bash" "$g"
-  head -n 1 "$dest$SQ_PREFIX/libexec/git-core/git-filter-branch" | grep -q "$SQ_PREFIX/bin/bash"
+  grep -q "$SQ_PREFIX/bin/bash" "$g" ||
+    { echo "git: $SQ_PREFIX/bin/bash is not in git; its shells:" >&2; grep -ao '[^"]*bin/[a-z]*sh' "$g" | sort -u | head >&2; return 1; }
+  local first
+  first=$(head -n 1 "$dest$SQ_PREFIX/libexec/git-core/git-filter-branch")
+  case $first in
+    "#!$SQ_PREFIX/bin/bash"*) ;;
+    *) echo "git: git-filter-branch starts $first" >&2; return 1 ;;
+  esac
+  echo "git: arm64, curl, mbedtls and zlib linked in, $SQ_PREFIX/bin/bash for its scripts"
 }
 
 recipe_after() {
