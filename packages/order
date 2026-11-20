@@ -11,6 +11,8 @@ gawk
 make
 mbedtls
 curl
+zlib
+git
 llvm
 sysroot
 runtimes

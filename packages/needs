@@ -21,3 +21,5 @@ llvm-tools: llvm
 lldb: runtimes
 zsh-autosuggestions: zsh
 zsh-syntax-highlighting: zsh
+# git's few shell-script commands run under bash.
+git: bash
