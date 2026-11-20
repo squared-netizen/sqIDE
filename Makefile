@@ -67,10 +67,18 @@ BUILD    ?= build
 
 # sqterm runs programs from its own files (its prefix, Sprint 12.5), which
 # Android 10 and later allow only to an app that targets SDK 28 or older: it is
-# side-loaded, never on Google Play. The minimum stays 22 (Android 5.1, the
-# tablet). Its fonts are stored uncompressed and mapped from the APK
-# (SQ_STORED, mk/squared_android_package.mk), and so are the bundled packages
-# (.tar.zst, already compressed: packages/build.sh writes them).
+# side-loaded, never on Google Play. Its fonts are stored uncompressed and
+# mapped from the APK (SQ_STORED, mk/squared_android_package.mk), and so are
+# the bundled packages (.tar.zst, already compressed: packages/build.sh
+# writes them).
+#
+# Built with the SDK's own toolchain (SQ_TOOLCHAIN=1: clang 23, libc++ 23,
+# sqterm's sysroot and runtimes packages; "One C++23 toolchain", phase 4),
+# which is built for Android 9 (API 28), so that is the minimum (decided
+# 2026-11-20). `make SQ_TOOLCHAIN=0` is the NDK build, kept for one release
+# as a way back; it still builds for Android 5.1 (API 22, the tablet).
+SQ_TOOLCHAIN ?= 1
+SQ_MIN_SDK ?= $(if $(filter 1,$(SQ_TOOLCHAIN)),28,22)
 SQ_TARGET_SDK ?= 28
 SQ_STORED ?= ttf otf ttc zst
 
