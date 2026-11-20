@@ -15,7 +15,7 @@
 # and zstd's decoder, the same files as squared's and sq_app's copies: pkg
 # links them from there, once.
 
-version=1
+version=2
 license="sqterm's own"
 file=
 top=
@@ -65,6 +65,7 @@ recipe_build() {
   mkdir -p "$out"
   "$cxx" -std=c++23 -stdlib=libc++ -O2 -Wall -Wextra -I"$ROOT/sq_app/src" -I"$ROOT/sq_app/third_party/zstd" \
     -I"$ROOT/squared/third_party/yyjson" \
+    -DSQTERM_PKG_VERSION="\"$version\"" \
     "$ROOT/sq_app/pkg/pkg.cpp" "$ROOT/sq_app/src/unpack.cpp" unpack_cartridge.o \
     "$cart/libsqcart.a" "$cart/libsqcart-unzstd.a" $ldflags -o "$out/pkg"
 }

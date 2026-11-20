@@ -1336,8 +1336,15 @@ int cmd_backup(std::string_view name, const std::string& dir) {
     return 0;
 }
 
-int usage() {
-    std::fprintf(stderr,
+// The package's version (packages/pkg/recipe.sh gives it).
+#ifndef SQTERM_PKG_VERSION
+#define SQTERM_PKG_VERSION "unknown"
+#endif
+
+/// The commands, on `out`: stderr after a mistake (status 2), stdout when
+/// asked for with --help (status 0).
+int usage(std::FILE* out = stderr, int status = 2) {
+    std::fprintf(out,
                  "usage: pkg list\n"
                  "       pkg info NAME\n"
                  "       pkg files NAME\n"
@@ -1349,8 +1356,9 @@ int usage() {
                  "       pkg remove NAME [--force]\n"
                  "       pkg backup NAME [DIR]\n"
                  "       pkg clean\n"
+                 "       pkg --help | --version\n"
                  "SOURCE: archive (pkg's own), sqterm (/sdcard/sqterm/packages), repo (the release)\n");
-    return 2;
+    return status;
 }
 
 /// Levenshtein distance, for a mistyped command.
@@ -1395,6 +1403,14 @@ int unknown(const std::string& cmd) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    if (argc > 1) {
+        const std::string_view first = argv[1];
+        if (first == "--help" || first == "-h" || first == "help") return usage(stdout, 0);
+        if (first == "--version" || first == "version") {
+            std::printf("pkg %s\n", SQTERM_PKG_VERSION);
+            return 0;
+        }
+    }
     const char* p = std::getenv("PREFIX");
     if (p == nullptr || *p != '/') return fail("PREFIX is not set (sqterm's shell sets it)");
     prefix = p;
