@@ -177,6 +177,15 @@ for API 28, and the crt objects, all from AOSP's bionic (a git source,
 NDK. `stubgen.awk` turns bionic's symbol lists into the stubs. It also
 installs `bin/clang.cfg` and `bin/clang++.cfg`, so plain `clang` uses it.
 
+It also carries Android's own API, as the NDK does: `android/*.h`, `jni.h`,
+EGL and GLES headers, and stubs for liblog, libandroid, libnativewindow,
+libEGL and libGLESv1_CM/v2/v3. These come from four more AOSP repositories
+at the same tag, named in the recipe's `also`, one line each:
+`SUB URL FOLDER...`. `fetch_packages.sh --sources` clones each one sparsely,
+with only those folders, as `sysroot.SUB`, and records its commit in
+`sources.lock`. The recipe reads each one as `$src_SUB`. So an Android app
+builds against the sysroot as it would against the NDK.
+
 **runtimes** (`bundled=no`): compiler-rt's builtins, libunwind, libc++abi and
 libc++ 23, static, with libc++'s module sources (`import std`), built from
 the same LLVM sources against the sysroot by a clang 23 for the build

@@ -106,7 +106,8 @@ package_key() (
       for path in ${inputs:-}; do echo "$path"; done
       echo packages/build.sh; } | LC_ALL=C sort |
       while read -r path; do printf '%s %s\n' "$(sha256sum "$ROOT/$path" | cut -d ' ' -f 1)" "$path"; done
-    awk -v f="$file" -v g="$1@${tag:-}" '$1 == f || $1 == g' "$LOCK"
+    awk -v f="$file" -v g="$1@${tag:-}" -v n="$1." -v t="@${tag:-}" \
+      '$1 == f || $1 == g || (index($1, n) == 1 && substr($1, length($1) - length(t) + 1) == t)' "$LOCK"
     printf 'api %s\n' "$SQ_API"
     for dependency in $depends; do printf 'depends %s %s\n' "$dependency" "$(package_key "$dependency")"; done
   } | sha256sum | cut -c 1-16
@@ -249,7 +250,7 @@ build_one() {
   local recipe_dir=$RECIPES/$name
   # The recipe's variables and functions, fresh for each package.
   unset -f recipe_patch recipe_build recipe_after 2>/dev/null || true
-  version= url= mirrors= sha256= file= top= depends= keep= inputs= license= bundled= git= tag=
+  version= url= mirrors= sha256= file= top= depends= keep= inputs= license= bundled= git= tag= also=
   . "$recipe_dir/recipe.sh"
   local here=$WORK/$name key
   key=$(package_key "$name")
@@ -280,6 +281,17 @@ build_one() {
     [ -n "$want" ] || fail "$name: no commit for $name@$tag in packages/sources.lock"
     [ "$(git -C "$src" rev-parse HEAD)" = "$want" ] ||
       fail "$name: the clone is not at $want (delete build/packages/sources/$name-$tag.git and fetch it again)"
+    # `also`: the recipe's other repositories, as src_SUB.
+    local sub
+    while read -r sub _; do
+      [ -n "$sub" ] || continue
+      local also_src=$SOURCES/$name.$sub-$tag.git
+      want=$(awk -v g="$name.$sub@$tag" '$1 == g { print $2 }' "$LOCK")
+      [ -d "$also_src/.git" ] && [ -n "$want" ] && [ "$(git -C "$also_src" rev-parse HEAD)" = "$want" ] ||
+        fail "$name: no clone of $name.$sub@$tag at the commit sources.lock records
+          (offline: tools/fetch_packages.sh --sources $name)"
+      export "src_$sub=$also_src"
+    done <<< "$also"
   elif [ -n "$file" ]; then
     check_source
     tar -xf "$SOURCES/$file" -C "$here"
