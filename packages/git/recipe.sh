@@ -25,12 +25,14 @@ keep="bin/git bin/git-shell bin/git-upload-pack bin/git-receive-pack bin/git-upl
 
 # SHELL_PATH is two things to git's Makefile: the shell its built scripts
 # and run-command use on the phone ($SQ_PREFIX/bin/bash), and the shell it
-# runs its own build steps with. The build machine has no $SQ_PREFIX, so its
-# build steps (recipe lines) use /bin/sh, and make's SHELL is given as
-# /bin/sh too (make SHELL=/bin/sh, below).
+# runs its own build steps with. The build machine has no $SQ_PREFIX, so
+# wherever the Makefiles run a script with it (recipe lines, and $(shell)
+# calls such as GIT-VERSION-GEN's, read before any rule) they use /bin/sh,
+# and make's SHELL is given as /bin/sh too (make SHELL=/bin/sh, below). What
+# is baked in (SHELL_PATH_SQ in sed and -D) is left alone.
 recipe_patch() {
-  sed -i -e '/^\t/ s/\$(SHELL_PATH) /\/bin\/sh /g' \
-         -e "/^\t/ s/'\$(SHELL_PATH_SQ)' /\/bin\/sh /g" Makefile
+  sed -i -e 's/\$(SHELL_PATH) /\/bin\/sh /g' \
+         -e "s/'\$(SHELL_PATH_SQ)' /\/bin\/sh /g" Makefile *.mak
 }
 
 recipe_build() {
