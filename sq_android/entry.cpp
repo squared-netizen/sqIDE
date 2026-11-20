@@ -687,6 +687,9 @@ struct Platform {
 #endif
         console.print("console: the log, as it is written. Three fingers or ` open and close it;");
         console.print("tap it to type, drag it to scroll, hold the input row to paste");
+        // Closed at start: it opens itself only for a crash report from the
+        // last run, or `make console-only`. Three fingers or ` open it.
+        bool open_at_start = false;
         // Crash reports: the last run's is shown now; this run's is kept for
         // the next, in the app's private files.
         if (const char* private_files = native->activity->internalDataPath;
@@ -694,8 +697,8 @@ struct Platform {
             std::snprintf(crash_path.data(), crash_path.size(), "%s/crash.txt", private_files);
             std::snprintf(crash_previous_path.data(), crash_previous_path.size(),
                           "%s/crash-previous.txt", private_files);
-            static_cast<void>(sq::console::show_crash_file(console, crash_path.data(),
-                                                           crash_previous_path.data()));
+            open_at_start = sq::console::show_crash_file(console, crash_path.data(),
+                                                         crash_previous_path.data());
             if (!sq::console::install_crash_file(crash_path.data(), &console)) {
                 SQ_LOGW("console: crash reports will not be kept");
             }
@@ -713,13 +716,14 @@ struct Platform {
             }
         }
         add_console_commands();
-        console.show();
         // `make console-only`: the Console runs, the App waits for `app start`,
         // so an App that crashes at start can still be reached.
         if (intent_flag(jni(), activity, "squared.console_only")) {
             app_stopped = true;
+            open_at_start = true;
             SQ_LOGI("console only: your App is not started; app start starts it");
         }
+        if (open_at_start) console.show();
 #ifdef SQUARED_BRIDGE_PORT
         looper = native->looper;
         open_bridge();
