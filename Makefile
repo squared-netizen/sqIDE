@@ -118,7 +118,9 @@ SQ_SO := $(BUILD)/lib$(SQ_PROJECT).so
 
 # Your code, plus the platform layer, plus the NDK's native-app-glue. The build
 # globs; there is no source list to keep in sync.
-APP_SRC  := $(shell find sq_app/src -name '*.cpp' 2>/dev/null | sort)
+# unpack_cartridge.cpp is pkg's (packages/pkg/recipe.sh builds it with
+# sqcart's reader, sq.cart): the app does not call it, and has no sq.cart.
+APP_SRC  := $(filter-out sq_app/src/unpack_cartridge.cpp,$(shell find sq_app/src -name '*.cpp' 2>/dev/null | sort))
 PLAT_SRC := $(shell find sq_android -maxdepth 1 -name '*.cpp' 2>/dev/null | sort)
 CXX_SRC  := $(APP_SRC) $(PLAT_SRC) $(SQ_KIT_SRC)
 # C code sqterm carries from elsewhere: zstd's decoder, for the packages (12.5).
