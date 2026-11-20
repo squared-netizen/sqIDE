@@ -1,0 +1,99 @@
+# The APK, built with the SDK's own toolchain ("One C++23 toolchain",
+# phase 4): apt.llvm.org's clang 23 with sqterm's sysroot and runtimes
+# packages from the `packages` release, at the keys this checkout's recipes
+# give. The NDK is not used: ANDROID_NDK_HOME and the runner's NDKs are
+# hidden from the build, so anything that reached for one fails here.
+#
+# What it shows: the native library and the APK build, link only against
+# what an app may (libc, libm, libdl, libandroid, liblog, libEGL,
+# libGLESv3), and carry the C++ runtime inside. Installing and starting it
+# is the phone's part (make dev).
+name: apk
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Makefile
+      - mk/**
+      - sq_app/**
+      - sq_android/**
+      - squared/**
+      - packages/sysroot/**
+      - packages/runtimes/**
+      - .github/workflows/apk.yml
+  pull_request:
+    paths:  # the same list as push
+      - Makefile
+      - mk/**
+      - sq_app/**
+      - sq_android/**
+      - squared/**
+      - packages/sysroot/**
+      - packages/runtimes/**
+      - .github/workflows/apk.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: clang 23
+        run: |
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm-23.list
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends clang-23 lld-23 llvm-23 zstd
+          echo "/usr/lib/llvm-23/bin" >> "$GITHUB_PATH"
+
+      - name: sysroot and runtimes, from the release
+        run: |
+          set -euo pipefail
+          prefix=$RUNNER_TEMP/prefix
+          mkdir -p "$prefix" "$RUNNER_TEMP/dl"
+          bash packages/build.sh --keys > keys.txt
+          for name in sysroot runtimes; do
+            read -r _ version key _ < <(awk -v n="$name" '$1 == n' keys.txt)
+            file=$name-$version-$key.tar.zst
+            gh release download packages -R "$GITHUB_REPOSITORY" -p "$file" -D "$RUNNER_TEMP/dl" ||
+              { echo "::error::$file is not in the release yet (the packages workflow publishes it from main)"; exit 1; }
+            tar --zstd -xf "$RUNNER_TEMP/dl/$file" -C "$prefix"
+          done
+          {
+            echo "SQ_SYSROOT=$prefix/share/sysroot"
+            echo "SQ_RUNTIMES=$prefix"
+            echo "SQ_LLVM_BIN=/usr/lib/llvm-23/bin"
+          } >> "$GITHUB_ENV"
+
+      - name: Android SDK tools (aapt2, apksigner; no NDK)
+        run: |
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          echo "$bt" >> "$GITHUB_PATH"
+          echo "ANDROID_NDK_HOME=" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_LATEST_HOME=" >> "$GITHUB_ENV"
+
+      - name: Build the APK (SQ_TOOLCHAIN=1)
+        run: |
+          set -euo pipefail
+          # The NDKs out of sight: a path into one would fail to resolve.
+          sudo mv "$ANDROID_HOME/ndk" "$RUNNER_TEMP/ndk-hidden" 2>/dev/null || true
+          clang --version | head -n 1
+          make -j4 SQ_TOOLCHAIN=1 status 2>&1 | tail -n 30 || true
+          make -j4 SQ_TOOLCHAIN=1 ANDROID_HOME="$ANDROID_HOME" apk
+
+      - name: What it links
+        run: |
+          so=$(ls build/lib/*/libsqterm.so 2>/dev/null || find build -name 'libsqterm.so' | head -n 1)
+          llvm-readelf -d "$so" | grep NEEDED
+          ! llvm-readelf -d "$so" | grep NEEDED | grep -qE 'c\+\+|unwind'
+          ls -l build/*.apk
