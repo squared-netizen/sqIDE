@@ -23,6 +23,16 @@ bundled=no
 keep="bin/git bin/git-shell bin/git-upload-pack bin/git-receive-pack bin/git-upload-archive
       libexec/git-core share/git-core share/licenses/git"
 
+# SHELL_PATH is two things to git's Makefile: the shell its built scripts
+# and run-command use on the phone ($SQ_PREFIX/bin/bash), and the shell it
+# runs its own build steps with. The build machine has no $SQ_PREFIX, so its
+# build steps (recipe lines) use /bin/sh, and make's SHELL is given as
+# /bin/sh too (make SHELL=/bin/sh, below).
+recipe_patch() {
+  sed -i -e '/^\t/ s/\$(SHELL_PATH) /\/bin\/sh /g' \
+         -e "/^\t/ s/'\$(SHELL_PATH_SQ)' /\/bin\/sh /g" Makefile
+}
+
 recipe_build() {
   # libcurl's static archive needs mbedtls' after it; CPPFLAGS and LDFLAGS
   # carry the three packages' headers and libraries (build.sh's depends).
@@ -48,13 +58,17 @@ NO_REGEX = NeedsStartEnd
 CURL_LDFLAGS = -lcurl -lmbedtls -lmbedx509 -lmbedcrypto
 CURL_CFLAGS =
 MAK
-  make -j"$JOBS" all
-  make install DESTDIR="$dest"
+  make -j"$JOBS" SHELL=/bin/sh all
+  make SHELL=/bin/sh install DESTDIR="$dest"
   # What it was built with: one program for the target, with HTTPS.
   local g=$dest$SQ_PREFIX/bin/git
   llvm-readelf -h "$g" | grep -q AArch64
   [ -x "$dest$SQ_PREFIX/libexec/git-core/git-remote-https" ]
   ! llvm-readelf -d "$g" | grep NEEDED | grep -qE 'curl|mbed|libz'
+  # The phone's shell, not the build machine's: in git (run-command, aliases
+  # with !) and in its scripts' first lines.
+  grep -q "$SQ_PREFIX/bin/bash" "$g"
+  head -n 1 "$dest$SQ_PREFIX/libexec/git-core/git-filter-branch" | grep -q "$SQ_PREFIX/bin/bash"
 }
 
 recipe_after() {
