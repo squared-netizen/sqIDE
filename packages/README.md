@@ -179,7 +179,7 @@ toolchain, LLVM's tablegen built for the build machine first
 bionic's headers and the kernel's, libc, libm and libdl as link-time stubs
 for API 28, and the crt objects, all from AOSP's bionic (a git source,
 `git=` and `tag=` in the recipe, its commit in `sources.lock`), not from the
-NDK. `stubgen.awk` turns bionic's symbol lists into the stubs. It also
+NDK. `stubgen.sh` turns bionic's symbol lists into the stubs. It also
 installs `bin/clang.cfg` and `bin/clang++.cfg`, so plain `clang` uses it.
 
 It also carries Android's own API, as the NDK does: `android/*.h`, `jni.h`,

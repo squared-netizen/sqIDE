@@ -14,18 +14,16 @@ keep="bin/make share/licenses/make"
 # confstr (_CS_PATH) unguarded, and bionic has neither: a small one that
 # gives Android's default PATH.
 recipe_patch() {
-  awk 'NR == 1, /^#include "makeint.h"/ { print; if (/^#include "makeint.h"/) {
-         print "#if defined(__ANDROID__) && !defined(_CS_PATH)"
-         print "#define _CS_PATH 0"
-         print "static size_t confstr (int name, char *buf, size_t len)"
-         print "{ static const char path[] = \"/system/bin\"; (void) name;"
-         print "  if (buf != NULL && len > 0) snprintf (buf, len, \"%s\", path);"
-         print "  return sizeof path; }"
-         print "#endif" } next } { print }' src/job.c > src/job.c.new
-  mv src/job.c.new src/job.c
-  grep -q 'define _CS_PATH 0' src/job.c
-  sed -i 's|default_shell = "/bin/sh"|default_shell = "/system/bin/sh"|' src/job.c
-  grep -q 'default_shell = "/system/bin/sh"' src/job.c
+  # After the one #include "makeint.h" ({{ and }} are braces to sqedit).
+  "$SQEDIT" sub -x -F --in-place --expect 1 '#include "makeint.h"' '{0}
+#if defined(__ANDROID__) && !defined(_CS_PATH)
+#define _CS_PATH 0
+static size_t confstr (int name, char *buf, size_t len)
+{{ static const char path[] = "/system/bin"; (void) name;
+  if (buf != NULL && len > 0) snprintf (buf, len, "%s", path);
+  return sizeof path; }}
+#endif' src/job.c
+  "$SQEDIT" sub -F --in-place --expect 2 'default_shell = "/bin/sh"' 'default_shell = "/system/bin/sh"' src/job.c
 }
 recipe_build() {
   ./configure ${SQ_HOST_TRIPLE:+--host=$SQ_HOST_TRIPLE --build=$(sh ./build-aux/config.guess 2>/dev/null || sh ./support/config.guess)} \

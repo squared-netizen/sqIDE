@@ -117,16 +117,17 @@ recipe_build() {
   printf '#include <cstdio>\n#include <string>\nint main() { std::string s = "hello"; std::puts(s.c_str()); }\n' > ../hello.cpp
   "${cxx[@]}" ../hello.cpp -o ../hello
   # import std: the module built from the installed sources, then used.
-  local std=$here_prefix/share/libc++/v$(ls "$here_prefix/share/libc++" | sed -n 's/^v//p' | head -n 1)
+  local std
+  std=$(ls -d "$here_prefix/share/libc++"/v* | head -n 1)
   "${cxx[@]}" -Wno-reserved-module-identifier --precompile "$std/std.cppm" -o ../std.pcm
   "${cxx[@]}" -c ../std.pcm -o ../std.o
   printf 'import std;\nint main() { std::println("hello from import std"); }\n' > ../hello_std.cpp
   "${cxx[@]}" -fmodule-file=std=../std.pcm ../hello_std.cpp ../std.o -o ../hello_std
-  "$bin/llvm-readelf" -d ../hello_std | grep 'NEEDED'
+  "$bin/llvm-readelf" -d ../hello_std | "$SQEDIT" match -F NEEDED
   local shared=$here_prefix/lib/$triple/libc++_shared.so
-  "$bin/llvm-readelf" -d "$shared" | grep -q 'Library soname: \[libc++_shared.so.1\]'
+  "$bin/llvm-readelf" -d "$shared" | "$SQEDIT" match -q -F 'Library soname: [libc++_shared.so.1]'
   "${cxx[@]/-static-libstdc++/-nostdlib++}" ../hello.cpp -lc++_shared -o ../hello_shared
-  "$bin/llvm-readelf" -d ../hello_shared | grep -q 'Shared library: \[libc++_shared.so.1\]'
+  "$bin/llvm-readelf" -d ../hello_shared | "$SQEDIT" match -q -F 'Shared library: [libc++_shared.so.1]'
   echo "runtimes: hello and import std link; hello_shared needs libc++_shared.so.1"
 }
 

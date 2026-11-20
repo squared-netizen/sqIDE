@@ -14,11 +14,11 @@
 #                                         `clang hello.c` finds it
 #
 # The stubs come from bionic's symbol lists (libc.map.txt and the others)
-# through stubgen.awk: what an app may call at API 28, nothing newer, nothing
+# through stubgen.sh: what an app may call at API 28, nothing newer, nothing
 # for the platform alone. The NDK does the same with AOSP's ndkstubgen.
 #
 # Built for one API level, 28, on CI; making the stubs for another level
-# when pkg installs it is a later step (stubgen.awk runs anywhere awk does).
+# when pkg installs it is a later step (stubgen.sh runs anywhere bash does).
 #
 # Android's own API, as the NDK has it ("One C++23 toolchain", phase 2):
 # its headers (android/*.h, jni.h, EGL, GLES) and stubs for the libraries an
@@ -45,7 +45,7 @@ file=
 top=
 depends=
 bundled=no
-inputs="packages/sysroot/stubgen.awk"
+inputs="packages/sysroot/stubgen.sh"
 keep="share/sysroot bin/clang.cfg bin/clang++.cfg share/licenses/sysroot"
 
 recipe_build() {
@@ -65,15 +65,15 @@ recipe_build() {
   cp -R "$k/uapi/asm-arm64/asm" "$inc/aarch64-linux-android/asm"
 
   # A library's stub: empty definitions with its symbol versions, from its
-  # symbol list (stubgen.awk).
+  # symbol list (stubgen.sh).
   stub() {
     local l=$1 map=$2
-    awk -v api="$SQ_API" -v arch=arm64 -v mode=c -f "$ROOT/packages/sysroot/stubgen.awk" "$map" > "$l.c"
-    awk -v api="$SQ_API" -v arch=arm64 -v mode=map -f "$ROOT/packages/sysroot/stubgen.awk" "$map" > "$l.map"
+    bash "$ROOT/packages/sysroot/stubgen.sh" c "$SQ_API" arm64 "$map" > "$l.c"
+    bash "$ROOT/packages/sysroot/stubgen.sh" map "$SQ_API" arm64 "$map" > "$l.map"
     "$clang" --target="aarch64-linux-android$SQ_API" -nostdlib -shared -fPIC -fno-builtin -w \
       -fuse-ld=lld -Wl,--version-script="$l.map" -Wl,-soname,"$l.so" \
       -Wl,-z,max-page-size=16384 "$l.c" -o "$lib/$l.so"
-    echo "$l.so: $(grep -c '(void) {}\|= 0;' "$l.c") symbols"
+    echo "$l.so: $("$SQEDIT" match -c '"(void) {}" / "= 0;"' "$l.c") symbols"
   }
 
   # Stubs: libc, libm, libdl, from their symbol lists.
@@ -94,7 +94,8 @@ recipe_build() {
   # outside the folders checked out is left out, and said.
   copy_files() {
     local from=$1 to=$2 f
-    (cd "$from" && find . -type l ! -exec test -e {} \; -print) | sed 's/^/left out (a link to nothing): /'
+    (cd "$from" && find . -type l ! -exec test -e {} \; -print) |
+      while IFS= read -r f; do echo "left out (a link to nothing): $f"; done
     (cd "$from" && find -L . -type f) | while read -r f; do
       mkdir -p "$to/$(dirname "$f")"
       cp -L "$from/$f" "$to/$f"
@@ -156,7 +157,7 @@ recipe_build() {
   # machine's clang, its own runtime), and needs only the device's libc.
   printf '#include <stdio.h>\nint main(void) { puts("hello from the sysroot"); return 0; }\n' > hello.c
   "$clang" --target="aarch64-linux-android$SQ_API" --sysroot="$root" -fuse-ld=lld hello.c -o hello
-  llvm-readelf -d hello | grep -q 'Shared library: \[libc.so\]'
+  llvm-readelf -d hello | "$SQEDIT" match -q -F 'Shared library: [libc.so]'
   echo "hello: links against the sysroot"
 
   # And an Android app's: every header squared's app includes, and every
@@ -183,7 +184,7 @@ void ANativeActivity_onCreate(ANativeActivity* a, void* state, size_t size) {
 C
   "$clang" --target="aarch64-linux-android$SQ_API" --sysroot="$root" -fuse-ld=lld -shared -fPIC \
     app.c -o libapp.so -landroid -llog -lEGL -lGLESv3
-  llvm-readelf -d libapp.so | grep -q 'Shared library: \[libandroid.so\]'
+  llvm-readelf -d libapp.so | "$SQEDIT" match -q -F 'Shared library: [libandroid.so]'
   echo "libapp.so: an Android app links against the sysroot"
 }
 

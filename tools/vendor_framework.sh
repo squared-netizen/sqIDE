@@ -38,7 +38,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY=1 ;;
     --force) FORCE=1 ;;
     --package) need "$@"; PKG_REPO=$2; shift ;;
-    -h | --help) sed -n '2,24p' "$0"; exit 0 ;;
+    -h | --help) head -n 24 "$0" | tail -n +2; exit 0 ;;
     *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -127,8 +127,8 @@ if [ -d "$here/squared" ]; then
     fw_files "$TMP/was/$TREE/squared" >"$TMP/want"
     fw_files "$here/squared" >"$TMP/have"
     drift=$({
-      LC_ALL=C comm -23 "$TMP/want" "$TMP/have" | sed 's|^\./|  missing   |'
-      LC_ALL=C comm -13 "$TMP/want" "$TMP/have" | sed 's|^\./|  added     |'
+      LC_ALL=C comm -23 "$TMP/want" "$TMP/have" | while IFS= read -r f; do printf '  missing   %s\n' "${f#./}"; done
+      LC_ALL=C comm -13 "$TMP/want" "$TMP/have" | while IFS= read -r f; do printf '  added     %s\n' "${f#./}"; done
       LC_ALL=C comm -12 "$TMP/want" "$TMP/have" | while IFS= read -r f; do
         cmp -s "$TMP/was/$TREE/squared/$f" "$here/squared/$f" || printf '  changed   %s\n' "${f#./}"
       done

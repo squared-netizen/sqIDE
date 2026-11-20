@@ -26,9 +26,11 @@ keep="bin/tic bin/infocmp bin/tput bin/clear bin/reset bin/tset bin/toe share/te
 recipe_patch() {
   # Paths outside the prefix that tic and tset use: there is no /tmp or /etc
   # an app can write on Android.
-  sed -i "s|\"/tmp/XXXXXX\"|\"$SQ_PREFIX/tmp/XXXXXX\"|" progs/tic.c
-  sed -i "s|\"/etc/termcap\"|\"$SQ_PREFIX/etc/termcap\"|" progs/tic.c
-  sed -i "s|\"/etc/ttytype\"|\"$SQ_PREFIX/etc/ttytype\"|; s|\"/etc/ttys\"|\"$SQ_PREFIX/etc/ttys\"|" progs/tset.c
+  local path file
+  for path in tic.c:/tmp/XXXXXX tic.c:/etc/termcap tset.c:/etc/ttytype tset.c:/etc/ttys; do
+    file=progs/${path%%:*} path=${path#*:}
+    "$SQEDIT" sub -F --in-place "\"$path\"" "\"$SQ_PREFIX$path\"" "$file"
+  done
 }
 
 recipe_build() {

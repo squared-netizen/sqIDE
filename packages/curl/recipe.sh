@@ -39,8 +39,8 @@ recipe_build() {
   make -j"$JOBS"
   make install DESTDIR="$dest"
   # What it was built with: HTTPS through mbedtls, Android's trust store.
-  grep -q '^#define USE_MBEDTLS 1' lib/curl_config.h
-  grep -q '^#define CURL_CA_PATH "/system/etc/security/cacerts"' lib/curl_config.h
+  "$SQEDIT" match -q -x -F '#define USE_MBEDTLS 1' lib/curl_config.h
+  "$SQEDIT" match -q -x -F '#define CURL_CA_PATH "/system/etc/security/cacerts"' lib/curl_config.h
 }
 
 recipe_after() {

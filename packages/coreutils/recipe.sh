@@ -16,8 +16,7 @@ keep="bin share/licenses/coreutils"
 # binary compiles every program, installed or not, so hostid's call is
 # stubbed rather than left out.
 recipe_patch() {
-  sed -i 's|id = gethostid ();|id = 0;|' src/hostid.c
-  grep -q 'id = 0;' src/hostid.c
+  "$SQEDIT" sub -F --in-place --expect 1 'id = gethostid ();' 'id = 0;' src/hostid.c
 }
 recipe_build() {
   ./configure ${SQ_HOST_TRIPLE:+--host=$SQ_HOST_TRIPLE --build=$(sh ./build-aux/config.guess 2>/dev/null || sh ./support/config.guess)} \
