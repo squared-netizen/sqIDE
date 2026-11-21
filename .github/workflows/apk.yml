@@ -39,9 +39,14 @@ on:
       - packages/sqedit/**
       - .github/workflows/apk.yml
   workflow_dispatch:
+    inputs:
+      release:
+        description: Publish the APK as a test prerelease (test-<commit>)
+        type: boolean
+        default: false
 
 permissions:
-  contents: read
+  contents: write  # the test prerelease; everything else only reads
 
 jobs:
   apk:
@@ -114,3 +119,18 @@ jobs:
           llvm-readelf -d "$so" | sqedit match -F NEEDED
           ! llvm-readelf -d "$so" | sqedit match -q '"NEEDED" (!("c++" / "unwind") .)* ("c++" / "unwind")'
           ls -l build/*.apk
+
+      # Run by hand with `release` ticked: the APK as a prerelease to install
+      # on the phone. Signed with a key apkpack makes for this run alone, so
+      # uninstall the sqterm already on the phone before installing it.
+      - name: Test release
+        if: github.event_name == 'workflow_dispatch' && inputs.release
+        run: |
+          set -euo pipefail
+          tag=test-${GITHUB_SHA::7}
+          apk=sqterm-$tag-arm64-v8a.apk
+          cp build/sqterm.apk "$apk"
+          sha256sum "$apk" > "$apk.sha256"
+          gh release create "$tag" "$apk" "$apk.sha256" --prerelease --target "$GITHUB_SHA" \
+            --title "sqterm $tag (arm64-v8a, test)" \
+            --notes "A test build of $GITHUB_SHA for arm64-v8a, API 28 and later. Its signing key was made for this build alone: uninstall the sqterm on the phone before installing this one."
