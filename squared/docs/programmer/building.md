@@ -148,6 +148,25 @@ name them with `SQ_LLVM_BIN`, `SQ_SYSROOT` and `SQ_RUNTIMES`. The build goes
 in `build/<BUILD>-<fingerprint>/`, so its modules never meet another
 toolchain's.
 
+The same toolchain, as data, is `build/toolchain.lua`: sqmake (0.4.0 and
+later) reads it and finds each part itself, with no shell, and
+`sqmake toolchain build/toolchain.lua` says what it found, where, and why,
+or exactly what is missing and how to get it. The two must agree:
+`tools/check_toolchain.sh` compares them (the same paths, the same
+fingerprint), and is run after changing either.
+
+sqmake builds squared's libraries from `build/squared.lua` (sqmake 0.5.0
+and later): the same libraries make's build makes, from the same sources
+(each module's interfaces and `src/*.cpp`, the graphics backend's folder,
+the Android-only sources on Android, yyjson, stb_image and FreeType as C).
+A workspace's build includes it and links what it returns:
+
+```lua
+toolchain.sdk("squared/build/toolchain.lua")
+local squared = include("squared/build/squared.lua")   -- squared_settings first, to change a default
+shlib{name = "game", srcs = glob("sq_app/src/*.cpp"), deps = {squared.all}}
+```
+
 ### Installing, starting, the log
 
 ```sh
