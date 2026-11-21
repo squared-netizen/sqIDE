@@ -52,6 +52,11 @@ apkpack/          apkpack 0.2.0 (MIT): the APK built and signed with no Java
 sqedit/           sqedit 0.1.0 (MIT): the text tool squared's build and
                   sqterm's scripts use in place of sed, grep and awk; C++23
                   modules, built as sqdrive is
+neovim/           neovim 0.12.6 (Apache-2.0 and Vim): nvim, its runtime
+                  files and tree-sitter parsers, its libraries built in
+                  (cmake.deps, from the recipe's `extra` files); CMake on the
+                  build machine, so CI builds it (not in the APK: pkg install
+                  neovim)
 ```
 
 ## As cartridges (from 2026-11-19)
