@@ -1464,11 +1464,14 @@ int main(int argc, char** argv) {
         int failed = 0;
         for (std::size_t i = 1; i < args.size(); ++i) {
             const std::string& what = args[i];
-            // A path, or a file here: as given. A bare package name: the
-            // index's (install_by_name).
+            // A path, or a regular file here: as given. A bare package name:
+            // the index's (install_by_name), also when a folder here has its
+            // name (pkg install sqmake in ~, beside a clone of sqmake), and
+            // always with --from, which only names choose a source for.
             struct stat st{};
             int status = 0;
-            if (what.find('/') == std::string::npos && ::stat(what.c_str(), &st) != 0 && good_name(what)) {
+            const bool file_here = ::stat(what.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+            if (what.find('/') == std::string::npos && good_name(what) && (from != Source::any || !file_here)) {
                 status = install_by_name(what, consume);
             } else if (from != Source::any) {
                 status = fail("--from is for installing by name, not a file (" + what + ")");
