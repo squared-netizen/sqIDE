@@ -56,6 +56,9 @@ sqmake/           sqmake 0.6.0 (MIT): the SDK's build system, build.lua in
                   Lua 5.4; finds the toolchain itself from squared's
                   build/toolchain.lua (sqmake toolchain); C++23 modules,
                   built as sqdrive is
+sqgen/            squared's layout compiler (MIT): names.json and layouts/
+                  into C++ for an app's build; built with sqmake (its own
+                  build, for the build machine, first) from squared/
 neovim/           neovim 0.12.6 (Apache-2.0 and Vim): nvim, its runtime
                   files and tree-sitter parsers, its libraries built in
                   (cmake.deps, from the recipe's `extra` files); CMake on the

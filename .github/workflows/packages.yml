@@ -28,6 +28,10 @@ on:
       - sq_app/src/unpack.hpp
       - sq_app/src/unpack_cartridge.cpp
       - squared/build/toolchain.sh
+      - SQUARED_REV
+      - squared/build/squared.lua
+      - squared/build/toolchain.lua
+      - squared/tools/sqgen/sqgen.cpp
       - sq_app/third_party/zstd/**
       - squared/third_party/yyjson/**
       # The cartridges' packer (not in any key: it packs the same installs).
@@ -44,6 +48,10 @@ on:
       - sq_app/src/unpack.hpp
       - sq_app/src/unpack_cartridge.cpp
       - squared/build/toolchain.sh
+      - SQUARED_REV
+      - squared/build/squared.lua
+      - squared/build/toolchain.lua
+      - squared/tools/sqgen/sqgen.cpp
       - sq_app/third_party/zstd/**
       - squared/third_party/yyjson/**
       # The cartridges' packer (not in any key: it packs the same installs).
