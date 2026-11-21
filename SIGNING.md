@@ -8,7 +8,7 @@ with this key updates the one before it in place.
 
 The key's certificate:
 
-    certificate SHA-256: (not yet recorded)
+    certificate SHA-256: e92c41b93ae98971e30ad98ebcfb6b2434f0997a27a6cff86adbb48a5cacc0eb
 
 To check an APK, in sqterm (or anywhere apkpack runs):
 
