@@ -57,6 +57,10 @@ NO_OPENSSL = YesPlease
 NO_INSTALL_HARDLINKS = YesPlease
 INSTALL_SYMLINKS = YesPlease
 NO_REGEX = NeedsStartEnd
+# bionic's getpwuid leaves pw_gecos NULL, and git reads a name from it when
+# user.name is not set: git clone segfaulted writing its reflog (on the
+# phone, 2026-11-21). Without it, git's default name is the login's.
+NO_GECOS_IN_PWENT = YesPlease
 # bionic declares sync_file_range only for _GNU_SOURCE builds at API 26 and
 # later; git falls back to fsync without it.
 HAVE_SYNC_FILE_RANGE =
