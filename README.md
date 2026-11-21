@@ -53,6 +53,16 @@ zstd`) and the NDK the APK builds use; see `packages/README.md`.
 
 The Makefile's head lists every target.
 
+Or with sqmake, the SDK's build tool, in sqterm itself (`pkg install sqmake
+sqedit apkpack llvm sysroot runtimes`), from `build.lua`, with no make and
+no shell:
+
+```sh
+sqmake        # build/sqterm.apk, signed with ~/.android/apkpack.pem
+```
+
+It builds the same APK as `make apk`; `sq/build/template.lua` says how.
+
 ## Layout
 
 ```
