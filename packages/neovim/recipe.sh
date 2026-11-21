@@ -92,6 +92,9 @@ recipe_build() {
   [ -f "$ndk_cmake" ] || { echo "neovim: no $ndk_cmake" >&2; return 1; }
   command -v cmake >/dev/null || { echo "neovim: needs cmake on the build machine" >&2; return 1; }
   local lua_gen nlua0_host="" nvim_host=""
+  # LuaJIT as built here, named to every CMake step (cmake.deps looks for a
+  # system one when it does not build its own).
+  luajit_at() { echo "-DLUAJIT_INCLUDE_DIR=$1/include/luajit-2.1" "-DLUAJIT_LIBRARY=$1/lib/libluajit-5.1.a"; }
 
   if [ "$SQ_CROSS" = 1 ]; then
     # neovim for the build machine, for its code generators.
@@ -99,10 +102,10 @@ recipe_build() {
     neovim_downloads "$host/deps"
     ( unset CC CFLAGS LDFLAGS CPPFLAGS AR RANLIB STRIP
       cmake -S cmake.deps -B "$host/deps" -DCMAKE_BUILD_TYPE=Release -DUSE_BUNDLED_LUAJIT=OFF \
-        -DUSE_BUNDLED_GETTEXT=OFF -DUSE_BUNDLED_LIBICONV=OFF
+        -DUSE_BUNDLED_GETTEXT=OFF -DUSE_BUNDLED_LIBICONV=OFF $(luajit_at "$host/deps/usr")
       cmake --build "$host/deps" -j"$JOBS"
       cmake -S . -B "$host/build" -DCMAKE_BUILD_TYPE=Release -DDEPS_PREFIX="$host/deps/usr" \
-        -DENABLE_LIBINTL=OFF -DCMAKE_INSTALL_PREFIX="$host/usr"
+        -DENABLE_LIBINTL=OFF -DCMAKE_INSTALL_PREFIX="$host/usr" $(luajit_at "$host/deps/usr")
       cmake --build "$host/build" -j"$JOBS" --target nvim_bin nlua0 )
     lua_gen=$host/deps/usr/bin/luajit
     nlua0_host=$(find "$host/build" -name 'libnlua0.so' -o -name 'nlua0.so' | head -n 1)
@@ -120,13 +123,13 @@ recipe_build() {
   # unibilium reads the terminfo sqterm's ncurses package installs.
   ( export CFLAGS="-DTERMINFO_DIRS=\\\"$SQ_PREFIX/share/terminfo\\\""
     cmake -S cmake.deps -B "$deps" "${android[@]}" -DUSE_BUNDLED_LUAJIT=OFF \
-      -DUSE_BUNDLED_GETTEXT=OFF -DUSE_BUNDLED_LIBICONV=OFF
+      -DUSE_BUNDLED_GETTEXT=OFF -DUSE_BUNDLED_LIBICONV=OFF $(luajit_at "$deps/usr")
     cmake --build "$deps" -j"$JOBS" )
   local -a host_prgs=()
   [ "$SQ_CROSS" = 1 ] && host_prgs=(-DNLUA0_HOST_PRG="$nlua0_host" -DNVIM_HOST_PRG="$nvim_host")
   cmake -S . -B build "${android[@]}" -DDEPS_PREFIX="$deps/usr" -DCMAKE_INSTALL_PREFIX="$SQ_PREFIX" \
     -DCMAKE_FIND_ROOT_PATH="$deps/usr" -DENABLE_LIBINTL=OFF -DCOMPILE_LUA=OFF \
-    -DLUA_GEN_PRG="$lua_gen" "${host_prgs[@]}"
+    -DLUA_GEN_PRG="$lua_gen" "${host_prgs[@]}" $(luajit_at "$deps/usr")
   cmake --build build -j"$JOBS"
   DESTDIR="$dest" cmake --install build
 
