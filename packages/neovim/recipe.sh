@@ -133,7 +133,10 @@ recipe_build() {
   cmake -S . -B build "${android[@]}" -DDEPS_PREFIX="$deps/usr" -DCMAKE_INSTALL_PREFIX="$SQ_PREFIX" \
     -DCMAKE_FIND_ROOT_PATH="$deps/usr" -DENABLE_LIBINTL=OFF -DCOMPILE_LUA=OFF \
     -DLUA_PRG="$lua_gen" -DLUA_GEN_PRG="$lua_gen" "${host_prgs[@]}" $(luajit_at "$deps/usr")
-  cmake --build build -j"$JOBS"
+  # A parallel build's error is lost among the other jobs' lines: on a
+  # failure, once more with one job, so the failing step is the last thing
+  # in the log (build.sh shows its end).
+  cmake --build build -j"$JOBS" || cmake --build build -j1
   DESTDIR="$dest" cmake --install build
 
   # What it was built with, each check saying so when it fails.
