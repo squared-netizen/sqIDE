@@ -78,11 +78,12 @@ recipe_patch() {
   # cmake.deps gives each library's build the compiler and nothing of a
   # toolchain file: the NDK's, so each is built for Android (libuv links no
   # librt there, and the rest find Android's headers).
+  # ({{ and }} are braces in sqedit's replacement.)
   "$SQEDIT" sub -F --in-place --expect 1 '  -D CMAKE_C_COMPILER=${CMAKE_C_COMPILER}' \
-    '  -D CMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-  -D CMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-  -D ANDROID_ABI=${ANDROID_ABI}
-  -D ANDROID_PLATFORM=${ANDROID_PLATFORM}' cmake/Deps.cmake
+    '  -D CMAKE_C_COMPILER=${{CMAKE_C_COMPILER}}
+  -D CMAKE_TOOLCHAIN_FILE=${{CMAKE_TOOLCHAIN_FILE}}
+  -D ANDROID_ABI=${{ANDROID_ABI}}
+  -D ANDROID_PLATFORM=${{ANDROID_PLATFORM}}' cmake/Deps.cmake
 }
 
 recipe_build() {
