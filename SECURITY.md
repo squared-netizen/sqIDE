@@ -21,3 +21,8 @@ Include, as far as you can:
 You will get a reply when the report has been read. Reports are handled
 on a best-effort basis by the project's one maintainer; a fix is made on
 `main`, and the report's author is credited unless they ask not to be.
+
+## Releases
+
+Releases are signed with the squared key; [SIGNING.md](SIGNING.md) records its
+certificate SHA-256 and how to check an APK against it.

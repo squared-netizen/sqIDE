@@ -103,6 +103,24 @@ jobs:
           echo "ANDROID_NDK=" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_LATEST_HOME=" >> "$GITHUB_ENV"
 
+      # The squared key (SIGNING.md), where the build signs with it. Without
+      # the secret (a pull request from a fork, or before it is added) apkpack
+      # makes a key for this run, and the test release below refuses to run.
+      - name: The squared key
+        env:
+          APKPACK_KEY: ${{ secrets.APKPACK_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$APKPACK_KEY" ]; then
+            mkdir -p ~/.android
+            ( umask 077; printf '%s\n' "$APKPACK_KEY" > ~/.android/apkpack.pem )
+            echo "SQ_SIGNED=squared" >> "$GITHUB_ENV"
+            echo "signing with the squared key"
+          else
+            echo "SQ_SIGNED=run" >> "$GITHUB_ENV"
+            echo "::warning::no APKPACK_KEY secret: signing with a key made for this run"
+          fi
+
       - name: Build the APK (SQ_TOOLCHAIN=1)
         run: |
           set -euo pipefail
@@ -123,19 +141,27 @@ jobs:
       # Run by hand with `release` ticked: two APKs as a prerelease to install
       # on the phone, each with its packages from the `packages` release
       # (tools/fetch_packages.sh --bundle): basic (zsh, pkg) and all (every
-      # package). Signed with a key apkpack makes for this run alone, so
-      # uninstall the sqterm already on the phone before installing one.
+      # package). Signed with the squared key, and only with it: each APK's
+      # certificate must be the one SIGNING.md records.
       - name: Test release
         if: github.event_name == 'workflow_dispatch' && inputs.release
         run: |
           set -euo pipefail
+          [ "$SQ_SIGNED" = squared ] ||
+            { echo "::error::no APKPACK_KEY secret: a release is signed with the squared key (SIGNING.md)"; exit 1; }
+          want=$(sqedit pick '"certificate SHA-256: " {%x+}' SIGNING.md || true)
+          [ ${#want} -eq 64 ] ||
+            { echo "::error::SIGNING.md records no certificate SHA-256: add the squared key's (apkpack keygen printed it)"; exit 1; }
           tag=test-${GITHUB_SHA::7}
           files=()
           for bundle in basic all; do
             bash tools/fetch_packages.sh --bundle "$bundle"
             rm -f build/sqterm.apk
             make -j4 SQ_TOOLCHAIN=1 apk
-            apkpack verify build/sqterm.apk
+            got=$(apkpack verify build/sqterm.apk)
+            echo "$got"
+            [ "${got##* }" = "$want" ] ||
+              { echo "::error::signed with ${got##* }, not the squared key $want (SIGNING.md)"; exit 1; }
             apk=sqterm-$tag-$bundle-arm64-v8a.apk
             cp build/sqterm.apk "$apk"
             sha256sum "$apk" > "$apk.sha256"
@@ -144,4 +170,4 @@ jobs:
           done
           gh release create "$tag" "${files[@]}" --prerelease --target "$GITHUB_SHA" \
             --title "sqterm $tag (arm64-v8a, test)" \
-            --notes "Test builds of $GITHUB_SHA for arm64-v8a, API 28 and later. basic: zsh and pkg (pkg installs the rest). all: every package bundled. Their signing key was made for this run alone: uninstall the sqterm on the phone before installing one."
+            --notes "Test builds of $GITHUB_SHA for arm64-v8a, API 28 and later. basic: zsh and pkg (pkg installs the rest). all: every package bundled. Signed with the squared key, certificate SHA-256 $want (SIGNING.md): apkpack verify prints it."
