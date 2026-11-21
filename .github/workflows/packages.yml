@@ -26,6 +26,8 @@ on:
       - sq_app/pkg/**
       - sq_app/src/unpack.cpp
       - sq_app/src/unpack.hpp
+      - sq_app/src/unpack_cartridge.cpp
+      - squared/build/toolchain.sh
       - sq_app/third_party/zstd/**
       - squared/third_party/yyjson/**
       # The cartridges' packer (not in any key: it packs the same installs).
@@ -40,6 +42,8 @@ on:
       - sq_app/pkg/**
       - sq_app/src/unpack.cpp
       - sq_app/src/unpack.hpp
+      - sq_app/src/unpack_cartridge.cpp
+      - squared/build/toolchain.sh
       - sq_app/third_party/zstd/**
       - squared/third_party/yyjson/**
       # The cartridges' packer (not in any key: it packs the same installs).
