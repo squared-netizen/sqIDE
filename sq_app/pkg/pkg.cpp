@@ -1028,7 +1028,13 @@ int cmd_search(std::string_view word) {
         if (a.name.find(word) == std::string::npos) continue;
         const auto it = all.find(a.name);
         std::string notes;
-        if (!a.bundled) notes += "  (not in the APK)";
+        // What install would download: its archive is neither in pkg's own
+        // archive (what this APK carried, and what was downloaded since) nor
+        // in the packages folder. Not the index's `bundled`, which says only
+        // what the default APK carries: the basic and all APKs differ.
+        const bool here = ::access((archive_dir() + "/" + a.asset()).c_str(), R_OK) == 0 ||
+                          ::access((packages_dir() + "/" + a.asset()).c_str(), R_OK) == 0;
+        if (!here) notes += "  (to download)";
         if (!a.needs.empty()) {
             notes += "  needs";
             for (const std::string& n : a.needs) notes += " " + n;
@@ -1076,7 +1082,7 @@ int cmd_info(const std::string& name) {
     }
     if (a != nullptr) {
         row("index", a->version + " (" + a->key + ")" + (m && m->key == a->key ? ", the same" : m ? ", differs (pkg upgrade)" : ""));
-        row("in the APK", a->bundled ? "yes" : "no");
+        row("in the default APK", a->bundled ? "yes" : "no (basic and all APKs differ: archive at says)");
         std::string needs;
         for (const std::string& n : a->needs) needs += (needs.empty() ? "" : " ") + n;
         row("needs", needs.empty() ? "nothing" : needs);
