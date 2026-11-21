@@ -16,7 +16,7 @@
 //                                    what installed packages need and lack
 //   pkg search [WORD]                the index's packages (with WORD in the
 //                                    name), what they need, which are installed
-//   pkg install NAME [--consume]     by name: the index's, and what it needs
+//   pkg install NAME... [--consume]  by name: the index's, and what it needs
 //                                    first; a name no index knows, the newest
 //                                    NAME-<version>-*.sq (or .tar.zst, .tar) in the
 //                                    packages folder, then Download
@@ -1352,7 +1352,7 @@ int usage(std::FILE* out = stderr, int status = 2) {
                  "       pkg update [--from SOURCE]\n"
                  "       pkg upgrade [NAME...] [--from SOURCE]\n"
                  "       pkg search [WORD] [--from SOURCE]\n"
-                 "       pkg install NAME|FILE [--consume] [--from SOURCE]\n"
+                 "       pkg install NAME|FILE... [--consume] [--from SOURCE]\n"
                  "       pkg remove NAME [--force]\n"
                  "       pkg backup NAME [DIR]\n"
                  "       pkg clean\n"
@@ -1458,16 +1458,27 @@ int main(int argc, char** argv) {
     if (cmd == "update" && args.size() == 1) return cmd_update();
     if (cmd == "upgrade") return cmd_upgrade({args.begin() + 1, args.end()});
     if (cmd == "search" && args.size() <= 2) return cmd_search(args.size() == 2 ? args[1] : std::string());
-    if (cmd == "install" && args.size() == 2) {
-        const std::string& what = args[1];
-        // A path, or a file here: as given. A bare package name: the
-        // index's (install_by_name).
-        struct stat st{};
-        if (what.find('/') == std::string::npos && ::stat(what.c_str(), &st) != 0 && good_name(what)) {
-            return install_by_name(what, consume);
+    if (cmd == "install" && args.size() >= 2) {
+        // Each in turn (pkg install llvm sqedit apkpack): one that fails is
+        // said and the rest still go in; the status says whether any failed.
+        int failed = 0;
+        for (std::size_t i = 1; i < args.size(); ++i) {
+            const std::string& what = args[i];
+            // A path, or a file here: as given. A bare package name: the
+            // index's (install_by_name).
+            struct stat st{};
+            int status = 0;
+            if (what.find('/') == std::string::npos && ::stat(what.c_str(), &st) != 0 && good_name(what)) {
+                status = install_by_name(what, consume);
+            } else if (from != Source::any) {
+                status = fail("--from is for installing by name, not a file (" + what + ")");
+            } else {
+                status = cmd_install_file(what, consume);
+            }
+            if (status != 0) ++failed;
         }
-        if (from != Source::any) return fail("--from is for installing by name, not a file");
-        return cmd_install_file(what, consume);
+        if (failed > 0 && args.size() > 2) return fail(std::to_string(failed) + " of " + std::to_string(args.size() - 1) + " not installed");
+        return failed > 0 ? 1 : 0;
     }
     if (cmd == "remove" && args.size() == 2) return cmd_remove(args[1], force);
     if (cmd == "clean" && args.size() == 1) return cmd_clean();
