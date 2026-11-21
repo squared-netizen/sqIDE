@@ -284,7 +284,7 @@ build_one() {
   local recipe_dir=$RECIPES/$name
   # The recipe's variables and functions, fresh for each package.
   unset -f recipe_patch recipe_build recipe_after 2>/dev/null || true
-  version= url= mirrors= sha256= file= top= depends= keep= inputs= license= bundled= git= tag= also=
+  version= url= mirrors= sha256= file= top= depends= keep= inputs= license= bundled= git= tag= also= extra=
   . "$recipe_dir/recipe.sh"
   local here=$WORK/$name key
   key=$(package_key "$name")
@@ -331,6 +331,19 @@ build_one() {
     tar -xf "$SOURCES/$file" -C "$here"
     src=$here/$top
     [ -d "$src" ] || fail "$name: $file has no $top/"
+    # `extra`: more source files, a line each: "SUB URL SHA256", kept as
+    # NAME.SUB-<the URL's last part> and given to the recipe as extra_SUB
+    # (a path; the recipe unpacks it where it wants it).
+    local sub url_ sha_ path_
+    while read -r sub url_ sha_; do
+      [ -n "$sub" ] || continue
+      path_=$SOURCES/$name.$sub-${url_##*/}
+      [ -f "$path_" ] || fail "$name: no build/packages/sources/${path_##*/}
+          (offline: tools/fetch_packages.sh --sources $name)"
+      [ "$(sha256sum "$path_" | cut -d ' ' -f 1)" = "$sha_" ] ||
+        fail "${path_##*/}: not the sha256 the recipe gives (delete it and fetch it again)"
+      export "extra_$sub=$path_"
+    done <<< "$extra"
   else
     # sqterm's own (pkg): built from this repository, named in `inputs`.
     src=$here/src

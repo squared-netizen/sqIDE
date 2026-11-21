@@ -269,7 +269,7 @@ fetch_git() {
 }
 
 fetch_source() {
-  local name=$1 version= url= mirrors= sha256= file= git= tag= also= from got=0 actual expected
+  local name=$1 version= url= mirrors= sha256= file= git= tag= also= extra= from got=0 actual expected
   local sub repo dirs
   # The recipe's source fields only; its functions are not run.
   . "$RECIPES/$name/recipe.sh"
@@ -285,6 +285,24 @@ fetch_source() {
     return
   fi
   if [ -z "$file" ]; then say local "$name (built from this repository)"; return; fi
+  # `extra`: more source files, "SUB URL SHA256" a line, each checked by
+  # the sha256 the recipe gives (packages/build.sh).
+  local sub xurl xsha xpath
+  while read -r sub xurl xsha; do
+    [ -n "$sub" ] || continue
+    xpath=$SOURCES/$name.$sub-${xurl##*/}
+    if [ -f "$xpath" ] && [ "$(sha256sum "$xpath" | cut -d ' ' -f 1)" = "$xsha" ]; then
+      say have "${xpath##*/}"; continue
+    fi
+    if [ "$DRY" = 1 ]; then say would "${xpath##*/} ($xurl)"; continue; fi
+    mkdir -p "$SOURCES"
+    say download "$xurl"
+    get "$xpath.part" "$xurl" || fail "$name: could not download $xurl"
+    [ "$(sha256sum "$xpath.part" | cut -d ' ' -f 1)" = "$xsha" ] ||
+      { rm -f "$xpath.part"; fail "${xpath##*/}: not the sha256 the recipe gives"; }
+    mv "$xpath.part" "$xpath"
+    say checked "${xpath##*/}"
+  done <<< "$extra"
   local path=$SOURCES/$file
   expected=$sha256
   if [ -z "$expected" ] && [ -f "$LOCK" ]; then
