@@ -34,8 +34,9 @@ recipe_build() {
   [ -d "$sysroot/usr/include" ] || { echo "no sysroot at $sysroot (build sysroot first)" >&2; return 1; }
   # 1. sqmake, for this machine: its own Makefile and CI's way (clang 23,
   #    libc++ 23), with none of the Android flags build.sh exports.
-  env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS make -C "$src" -j"$JOBS" BUILD="$here/host" \
-    CXX="$bin/clang++" AR="$bin/llvm-ar" "$here/host/sqmake"
+  #    CC too: build.sh's is the Android one (yyjson is C).
+  env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS -u CC -u CXX make -C "$src" -j"$JOBS" BUILD="$here/host" \
+    CXX="$bin/clang++" CC="$bin/clang" AR="$bin/llvm-ar" "$here/host/sqmake"
   # 2. sqgen, for Android: a build.lua beside a copy of squared (sqmake
   #    writes its build/ there), the toolchain found from the installs of
   #    what this depends on.
