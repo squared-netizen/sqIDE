@@ -61,9 +61,9 @@ recipe_build() {
   mkdir -p "$dest$SQ_PREFIX/bin"
   cp "$out/sqdrive" "$dest$SQ_PREFIX/bin/sqdrive"
   # What it is: an arm64 Android program that needs no C++ library.
-  "$bin/llvm-readelf" -h "$dest$SQ_PREFIX/bin/sqdrive" | grep AArch64 >/dev/null
-  "$bin/llvm-readelf" -l "$dest$SQ_PREFIX/bin/sqdrive" | grep /system/bin/linker64 >/dev/null
-  ! "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/sqdrive" | grep 'NEEDED' | grep -q 'c++'
+  "$bin/llvm-readelf" -h "$dest$SQ_PREFIX/bin/sqdrive" | "$SQEDIT" match -q -F AArch64
+  "$bin/llvm-readelf" -l "$dest$SQ_PREFIX/bin/sqdrive" | "$SQEDIT" match -q -F /system/bin/linker64
+  ! "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/sqdrive" | "$SQEDIT" match -q '"NEEDED" (!"c++" .)* "c++"'
 }
 
 recipe_after() {

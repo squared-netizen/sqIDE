@@ -31,8 +31,8 @@ keep="bin/git bin/git-shell bin/git-upload-pack bin/git-receive-pack bin/git-upl
 # and make's SHELL is given as /bin/sh too (make SHELL=/bin/sh, below). What
 # is baked in (SHELL_PATH_SQ in sed and -D) is left alone.
 recipe_patch() {
-  sed -i -e 's/\$(SHELL_PATH) /\/bin\/sh /g' \
-         -e "s/'\$(SHELL_PATH_SQ)' /\/bin\/sh /g" Makefile *.mak
+  "$SQEDIT" sub -F --in-place '$(SHELL_PATH) ' '/bin/sh ' Makefile *.mak
+  "$SQEDIT" sub -F --in-place "'\$(SHELL_PATH_SQ)' " '/bin/sh ' Makefile *.mak
 }
 
 recipe_build() {
@@ -70,16 +70,17 @@ MAK
   make SHELL=/bin/sh install DESTDIR="$dest"
   # What it was built with, each check saying so when it fails.
   local g=$dest$SQ_PREFIX/bin/git
-  llvm-readelf -h "$g" | grep AArch64 >/dev/null || { echo "git: not an arm64 program" >&2; return 1; }
+  llvm-readelf -h "$g" | "$SQEDIT" match -q -F AArch64 || { echo "git: not an arm64 program" >&2; return 1; }
   [ -e "$dest$SQ_PREFIX/libexec/git-core/git-remote-https" ] ||
     { echo "git: no git-remote-https" >&2; ls "$dest$SQ_PREFIX/libexec/git-core" | head -50 >&2; return 1; }
-  if llvm-readelf -d "$g" | grep NEEDED | grep -qE 'curl|mbed|libz'; then
+  if llvm-readelf -d "$g" | "$SQEDIT" match -q '"NEEDED" (!("curl" / "mbed" / "libz") .)* ("curl" / "mbed" / "libz")'; then
     echo "git: needs a shared curl, mbedtls or zlib" >&2; return 1
   fi
   # The phone's shell, not the build machine's: in git (run-command, aliases
   # with !) and in its scripts' first lines.
-  grep -q "$SQ_PREFIX/bin/bash" "$g" ||
-    { echo "git: $SQ_PREFIX/bin/bash is not in git; its shells:" >&2; grep -ao '[^"]*bin/[a-z]*sh' "$g" | sort -u | head >&2; return 1; }
+  "$SQEDIT" match -q -F "$SQ_PREFIX/bin/bash" "$g" ||
+    { echo "git: $SQ_PREFIX/bin/bash is not in git; its shells:" >&2
+      "$SQEDIT" match -o 'shell <- (!S [^"%c])* S  S <- "bin/" (!"sh" [a-z])* "sh"' "$g" | sort -u | head >&2; return 1; }
   local first
   first=$(head -n 1 "$dest$SQ_PREFIX/libexec/git-core/git-filter-branch")
   case $first in

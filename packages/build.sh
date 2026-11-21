@@ -31,12 +31,16 @@
 #                                       .github/workflows/packages.yml), or
 #   tools/fetch_packages.sh --sources   the sources, then: make packages
 #
-# A build runs on the phone (Termux: clang, make, tar, xz, zstd) with the NDK
+# A build runs on the phone (Termux: clang, make, tar, xz, zstd, sqedit) with the NDK
 # the APK builds use ($ANDROID_NDK_HOME, or the newest under
 # $PREFIX/opt/android-sdk/ndk), and on CI's x86 Linux with the NDK's clang.
 # Off the phone it is a cross build (SQ_CROSS=1): nothing it builds can run
 # there, so the recipes give configure its answers and build what they must
 # run (ncurses' tic) for the build machine too.
+#
+# sqedit (github.com/squared-netizen/sqedit) does what sed, grep and awk did
+# in this script and the recipes: $SQEDIT, or sqedit on PATH, for the build
+# machine (sqterm's own package on the phone; CI builds it first).
 #
 # Idempotent: each build starts from a fresh copy of the source; the package
 # is written beside its old one and moved into place.
@@ -47,10 +51,23 @@ RECIPES=$ROOT/packages
 WORK=$ROOT/build/packages
 SOURCES=$WORK/sources
 LOCK=$RECIPES/sources.lock
+SQEDIT=${SQEDIT:-sqedit}
 # The packages, in the order they build and install: packages/order, a
 # name a line. Its own file, not this script: every key covers this script,
 # and a package added would otherwise rebuild them all.
-ORDER=$(grep -v '^#' "$RECIPES/order" | tr '\n' ' ')
+ORDER=
+while IFS= read -r line; do
+  case $line in '#'*) ;; *) ORDER+="$line " ;; esac
+done < "$RECIPES/order"
+
+# The second word of each packages/sources.lock line whose first word is $1.
+lock_value() {
+  local key value _
+  [ -f "$LOCK" ] || return 0
+  while read -r key value _; do
+    if [ "$key" = "$1" ]; then echo "$value"; fi
+  done < "$LOCK"
+}
 
 # Where the app's prefix is: what every program is built to find its files
 # under. The app's getFilesDir() is /data/user/0/dev.squared.sqterm/files,
@@ -81,7 +98,7 @@ while [ $# -gt 0 ]; do
         (. "$RECIPES/$name/recipe.sh"; printf '  %-10s %s\n' "$name" "$version")
       done
       exit 0 ;;
-    -h | --help) sed -n '2,40p' "$0"; exit 0 ;;
+    -h | --help) head -n 43 "$0" | tail -n +2; exit 0 ;;
     -*) fail "unknown option: $1 (see --help)" ;;
     *) [ -f "$RECIPES/$1/recipe.sh" ] || fail "no recipe: packages/$1/recipe.sh"
        names+=("$1") ;;
@@ -89,6 +106,8 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ ${#names[@]} -gt 0 ] || read -r -a names <<< "$ORDER"
+[ "$MODE" != build ] || command -v "$SQEDIT" >/dev/null ||
+  fail "no sqedit (github.com/squared-netizen/sqedit): put it on PATH or set SQEDIT"
 
 need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is missing${2:+ (Termux: pkg install $2)}"; }
 
@@ -106,8 +125,15 @@ package_key() (
       for path in ${inputs:-}; do echo "$path"; done
       echo packages/build.sh; } | LC_ALL=C sort |
       while read -r path; do printf '%s %s\n' "$(sha256sum "$ROOT/$path" | cut -d ' ' -f 1)" "$path"; done
-    awk -v f="$file" -v g="$1@${tag:-}" -v n="$1." -v t="@${tag:-}" \
-      '$1 == f || $1 == g || (index($1, n) == 1 && substr($1, length($1) - length(t) + 1) == t)' "$LOCK"
+    # Its source's lines in sources.lock: its file, its clone, its others.
+    local line key
+    while IFS= read -r line; do
+      read -r key _ <<< "$line"
+      if [ "$key" = "$file" ] || [ "$key" = "$1@${tag:-}" ] ||
+         { [[ $key == "$1."* ]] && [[ $key == *"@${tag:-}" ]]; }; then
+        printf '%s\n' "$line"
+      fi
+    done < "$LOCK"
     printf 'api %s\n' "$SQ_API"
     for dependency in $depends; do printf 'depends %s %s\n' "$dependency" "$(package_key "$dependency")"; done
   } | sha256sum | cut -c 1-16
@@ -208,7 +234,7 @@ check_source() {
   local actual expected=$sha256
   actual=$(sha256sum "$path" | cut -d ' ' -f 1)
   if [ -z "$expected" ] && [ -f "$LOCK" ]; then
-    expected=$(awk -v f="$file" '$1 == f { print $2 }' "$LOCK")
+    expected=$(lock_value "$file")
   fi
   [ -n "$expected" ] || fail "$file: no sha256 in the recipe or packages/sources.lock
           (tools/fetch_packages.sh --sources records one)"
@@ -240,7 +266,15 @@ write_manifest() {
     printf '  "id": "%s",\n  "version": "%s",\n  "license": "%s",\n' "$name" "$version" "$license"
     printf '  "consumers": {\n    "sqterm": {\n      "key": "%s",\n      "api": %s,\n' "$key" "$SQ_API"
     printf '      "built_with": [%s],\n      "files": [\n' "$with"
-    find $keep ! -type d | LC_ALL=C sort | sed 's/\\/\\\\/g; s/"/\\"/g; s/.*/        "&"/; $!s/$/,/'
+    # Each a JSON string, a comma after all but the last.
+    find $keep ! -type d | LC_ALL=C sort | {
+      local f comma=
+      while IFS= read -r f; do
+        f=${f//\\/\\\\}; f=${f//\"/\\\"}
+        printf '%s        "%s"' "$comma" "$f"; comma=$',\n'
+      done
+      [ -z "$comma" ] || echo
+    }
     printf '      ]\n    }\n  }\n}\n'
   } > SQ-INF/manifest.json
 }
@@ -277,7 +311,7 @@ build_one() {
     [ -d "$src/.git" ] || fail "$name: no clone build/packages/sources/$name-$tag.git
           (offline: tools/fetch_packages.sh --sources $name)"
     local want
-    want=$(awk -v g="$name@$tag" '$1 == g { print $2 }' "$LOCK")
+    want=$(lock_value "$name@$tag")
     [ -n "$want" ] || fail "$name: no commit for $name@$tag in packages/sources.lock"
     [ "$(git -C "$src" rev-parse HEAD)" = "$want" ] ||
       fail "$name: the clone is not at $want (delete build/packages/sources/$name-$tag.git and fetch it again)"
@@ -286,7 +320,7 @@ build_one() {
     while read -r sub _; do
       [ -n "$sub" ] || continue
       local also_src=$SOURCES/$name.$sub-$tag.git
-      want=$(awk -v g="$name.$sub@$tag" '$1 == g { print $2 }' "$LOCK")
+      want=$(lock_value "$name.$sub@$tag")
       [ -d "$also_src/.git" ] && [ -n "$want" ] && [ "$(git -C "$also_src" rev-parse HEAD)" = "$want" ] ||
         fail "$name: no clone of $name.$sub@$tag at the commit sources.lock records
           (offline: tools/fetch_packages.sh --sources $name)"
@@ -304,7 +338,7 @@ build_one() {
   fi
   local saved_cppflags=$CPPFLAGS saved_ldflags=$LDFLAGS
   for dependency in $depends; do use_dependency "$dependency"; done
-  export CPPFLAGS LDFLAGS SQ_PREFIX SQ_HOST_TRIPLE SQ_CROSS SQ_API SQ_SYSROOT SQ_NDK JOBS ROOT src dest version
+  export CPPFLAGS LDFLAGS SQ_PREFIX SQ_HOST_TRIPLE SQ_CROSS SQ_API SQ_SYSROOT SQ_NDK JOBS ROOT SQEDIT src dest version
   # In a bash of its own, so a failing step stops it (set -e does not reach
   # into a command on the left of ||).
   bash -c 'set -euo pipefail; . "$1"; cd "$src"
@@ -323,7 +357,8 @@ build_one() {
     linked=$(find $keep -type f -links +1 -print -quit 2>/dev/null || true)
     [ -z "$linked" ] || fail "$name: $linked is hard-linked; make it a copy or a symbolic link in recipe_after"
     find $keep -type f -perm -u+x 2>/dev/null | while read -r program; do
-      if head -c 4 "$program" | grep -q 'ELF'; then $STRIP "$program" 2>/dev/null || true; fi
+      magic=; LC_ALL=C read -r -n 4 magic < "$program" || true
+      if [ "$magic" = $'\x7fELF' ]; then $STRIP "$program" 2>/dev/null || true; fi
     done
     write_manifest )
   mkdir -p "$into"

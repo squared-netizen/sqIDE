@@ -34,7 +34,7 @@ DELETE=0
 case ${1:-} in
   '') ;;
   --delete) DELETE=1 ;;
-  -h | --help) sed -n '2,22p' "$0"; exit 0 ;;
+  -h | --help) head -n 22 "$0" | tail -n +2; exit 0 ;;
   *) fail "unknown option: $1 (see --help)" ;;
 esac
 command -v gh >/dev/null 2>&1 || fail "gh is missing (Termux: pkg install gh; gh auth login)"

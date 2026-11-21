@@ -68,7 +68,8 @@ jobs:
           mkdir -p "$prefix" "$RUNNER_TEMP/dl"
           bash packages/build.sh --keys > keys.txt
           for name in sysroot runtimes; do
-            read -r _ version key _ < <(awk -v n="$name" '$1 == n' keys.txt)
+            version= key=
+            while read -r n v k _; do if [ "$n" = "$name" ]; then version=$v key=$k; fi; done < keys.txt
             file=$name-$version-$key.tar.zst
             gh release download packages -R "$GITHUB_REPOSITORY" -p "$file" -D "$RUNNER_TEMP/dl" ||
               { echo "::error::$file is not in the release yet (the packages workflow publishes it from main)"; exit 1; }
@@ -110,6 +111,6 @@ jobs:
       - name: What it links
         run: |
           so=$(ls build/lib/*/libsqterm.so 2>/dev/null || find build -name 'libsqterm.so' | head -n 1)
-          llvm-readelf -d "$so" | grep NEEDED
-          ! llvm-readelf -d "$so" | grep NEEDED | grep -qE 'c\+\+|unwind'
+          llvm-readelf -d "$so" | sqedit match -F NEEDED
+          ! llvm-readelf -d "$so" | sqedit match -q '"NEEDED" (!("c++" / "unwind") .)* ("c++" / "unwind")'
           ls -l build/*.apk

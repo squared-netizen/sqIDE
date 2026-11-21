@@ -26,23 +26,19 @@ keep="bin/zsh bin/zsh-$version share/zsh etc/zshrc share/licenses/zsh"
 recipe_patch() {
   # Here-documents and the like: /tmp/zsh* by default; Android has no /tmp
   # an app can write.
-  sed -i "s|\"/tmp/zsh\"|\"$SQ_PREFIX/tmp/zsh\"|" config.h.in
-  grep -q "$SQ_PREFIX/tmp/zsh" config.h.in
+  "$SQEDIT" sub -F --in-place --expect 1 '"/tmp/zsh"' "\"$SQ_PREFIX/tmp/zsh\"" config.h.in
   # A script with no #! line runs under /bin/sh, which Android does not have.
-  sed -i 's|execve("/bin/sh", |execve("/system/bin/sh", |' Src/exec.c
-  grep -q 'execve("/system/bin/sh", ' Src/exec.c
+  "$SQEDIT" sub -F --in-place --expect 1 'execve("/bin/sh", ' 'execve("/system/bin/sh", ' Src/exec.c
   # A script whose #! names /bin/sh, /usr/bin/env or /bin/bash: Android has
   # none of them, and zsh only searched PATH for an interpreter named
   # without a path. Now a missing one is found by its name on PATH
   # (packages/zsh/interpreter.c), found in sqterm's prefix or /system/bin.
-  sed -i "s|^#include \"exec.pro\"$|&\n#include \"$ROOT/packages/zsh/interpreter.c\"|" Src/exec.c
-  sed -i "s|^\t\t\t    if (\*ptr2 != '/' \&\&$|\t\t\t    if (1 \&\&|" Src/exec.c
-  sed -i "s|^\t\t\t\t(pprog = pathprog(ptr2, NULL))) {$|\t\t\t\t(pprog = sqterm_interpreter(ptr2))) {|" Src/exec.c
-  grep -q "packages/zsh/interpreter.c" Src/exec.c
-  grep -q "(pprog = sqterm_interpreter(ptr2))) {" Src/exec.c
-  ! grep -q "if (\*ptr2 != '/' &&$" Src/exec.c
+  "$SQEDIT" sub -x -F --in-place --expect 1 '#include "exec.pro"' "{0}\n#include \"$ROOT/packages/zsh/interpreter.c\"" Src/exec.c
+  "$SQEDIT" sub -x -F --in-place --expect 1 $'\t\t\t    if (*ptr2 != \'/\' &&' $'\t\t\t    if (1 &&' Src/exec.c
+  "$SQEDIT" sub -x -F --in-place --expect 1 $'\t\t\t\t(pprog = pathprog(ptr2, NULL))) {' \
+    $'\t\t\t\t(pprog = sqterm_interpreter(ptr2))) {{' Src/exec.c
   # Setting the line discipline is refused to an app; each try costs a call.
-  sed -i 's|^#if defined(TIOCSETD) && defined(NTTYDISC)$|#if defined(TIOCSETD) \&\& defined(NTTYDISC) \&\& !defined(__ANDROID__)|' Src/init.c
+  "$SQEDIT" sub -x -F --in-place --expect 2 '#if defined(TIOCSETD) && defined(NTTYDISC)' '{0} && !defined(__ANDROID__)' Src/init.c
 }
 
 recipe_build() {
@@ -66,13 +62,15 @@ recipe_build() {
   local module
   for module in deltochar files mapfile mathfunc param_private regex stat system \
                 watch zprof zpty zselect; do
-    sed -i "s|^\(name=[^ ]* modfile=[^ ]*/$module\.mdd link=\)no|\1static|" config.modules
+    "$SQEDIT" sub -x --in-place \
+      "{\"name=\" [^ ]* \" modfile=\" (!\"/$module.mdd link=\" [^ ])* \"/$module.mdd link=\"} \"no\" {.*}" \
+      '{1}static{2}' config.modules || [ $? = 1 ]
   done
   # Other systems' completions (their package managers, their commands).
   local system
   for system in AIX BSD Cygwin Darwin Debian Mandriva openSUSE Redhat Solaris; do
     rm -rf "Completion/$system"
-    sed -i "s#[[:space:]]*Completion/$system/\*/\*##g" Src/Zle/complete.mdd
+    "$SQEDIT" sub --in-place "%s* \"Completion/$system/*/*\"" '' Src/Zle/complete.mdd || [ $? = 1 ]
   done
   make -j"$JOBS"
   # LN=cp: the install links zsh to zsh-<version>, and Android refuses a

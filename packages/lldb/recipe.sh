@@ -54,12 +54,8 @@ recipe_patch() {
   # sync with inferior process" (2026-11-17, on the phone). An app has no
   # setgid powers to drop. Termux's lldb carries the same change.
   local f=lldb/source/Host/posix/ProcessLauncherPosixFork.cpp
-  sed -i '/^    if (setgid(getgid()) != 0)$/{i\
-#if !defined(__ANDROID__)
-n;a\
-#endif
-}' "$f"
-  grep -A3 '^#if !defined(__ANDROID__)$' "$f" | grep -q '^#endif$'
+  "$SQEDIT" wrap -x -F --lines 2 --in-place --expect 1 \
+    '    if (setgid(getgid()) != 0)' '#if !defined(__ANDROID__)' '#endif' "$f"
 }
 
 recipe_build() {
@@ -134,15 +130,16 @@ recipe_build() {
   local p d
   for p in bin/lldb bin/lldb-server bin/lldb-dap bin/lldb-argdumper lib/liblldb.so; do
     d=$("$bin/llvm-readelf" -d "$dest$SQ_PREFIX/$p")
-    echo "$p:"; echo "$d" | grep -E 'NEEDED|RUNPATH|RPATH'
-    echo "$d" | grep -q "RUNPATH.*\[$SQ_PREFIX/lib\]" || [ "$p" = bin/lldb-argdumper ] ||
+    echo "$p:"; echo "$d" | "$SQEDIT" match '"NEEDED" / "RUNPATH" / "RPATH"'
+    echo "$d" | "$SQEDIT" match -q "\"RUNPATH\" (!\"[$SQ_PREFIX/lib]\" .)* \"[$SQ_PREFIX/lib]\"" || [ "$p" = bin/lldb-argdumper ] ||
       { echo "$p has no RUNPATH of $SQ_PREFIX/lib" >&2; return 1; }
-    echo "$d" | grep -E 'NEEDED' | grep -vE '\[(libc|libm|libdl|libc\+\+_shared|liblldb)\.so(\.1)?\]' &&
+    echo "$d" | "$SQEDIT" match -F NEEDED |
+      "$SQEDIT" match -v '"[" ("libc++_shared" / "libc" / "libm" / "libdl" / "liblldb") ".so" ".1"? "]"' &&
       { echo "$p needs a library sqterm has not" >&2; return 1; }
   done
-  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/lldb" | grep 'Shared library: \[liblldb\.so\]' >/dev/null
-  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/lib/liblldb.so" | grep 'Shared library: \[libc++_shared\.so\.1\]' >/dev/null
-  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/lldb" | grep "RUNPATH.*\[$SQ_PREFIX/lib\]" >/dev/null
+  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/lldb" | "$SQEDIT" match -q -F 'Shared library: [liblldb.so]'
+  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/lib/liblldb.so" | "$SQEDIT" match -q -F 'Shared library: [libc++_shared.so.1]'
+  "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/lldb" | "$SQEDIT" match -q "\"RUNPATH\" (!\"[$SQ_PREFIX/lib]\" .)* \"[$SQ_PREFIX/lib]\""
   echo "lldb: links against liblldb and libc++_shared.so.1"
 }
 

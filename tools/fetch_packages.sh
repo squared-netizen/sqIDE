@@ -55,6 +55,15 @@ SQ_PACKAGES_URL=${SQ_PACKAGES_URL:-https://github.com/$SQ_PACKAGES_REPO/releases
 
 say() { printf '  %-14s %s\n' "$1" "$2"; }
 fail() { printf 'fetch_packages: %s\n' "$*" >&2; exit 1; }
+
+# The second word of each packages/sources.lock line whose first word is $1.
+lock_value() {
+  local key value _
+  [ -f "$LOCK" ] || return 0
+  while read -r key value _; do
+    if [ "$key" = "$1" ]; then echo "$value"; fi
+  done < "$LOCK"
+}
 need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is missing (Termux: pkg install $2)"; }
 get() { curl -fsSL --retry 3 --connect-timeout 20 -o "$1" "$2"; }
 
@@ -66,7 +75,7 @@ while [ $# -gt 0 ]; do
     --sources) MODE=sources ;;
     --get) MODE=get ;;
     --dry-run) DRY=1 ;;
-    -h | --help) sed -n '2,38p' "$0"; exit 0 ;;
+    -h | --help) head -n 38 "$0" | tail -n +2; exit 0 ;;
     -*) fail "unknown option: $1 (see --help)" ;;
     *) [ -f "$RECIPES/$1/recipe.sh" ] || fail "no recipe: packages/$1/recipe.sh"
        names+=("$1") ;;
@@ -120,8 +129,14 @@ fetch_release() {
 
 # What a package needs at run time (packages/needs), comma-separated, or -.
 needs_of() {
-  local n
-  n=$(awk -v n="$1:" '$1 == n { $1 = ""; sub(/^ +/, ""); gsub(/ +/, ","); print }' "$RECIPES/needs" 2>/dev/null)
+  local n= key rest words
+  if [ -f "$RECIPES/needs" ]; then
+    while read -r key rest; do
+      [ "$key" = "$1:" ] || continue
+      read -r -a words <<< "$rest"
+      n=$(IFS=,; echo "${words[*]}")
+    done < "$RECIPES/needs"
+  fi
   echo "${n:--}"
 }
 
@@ -204,7 +219,7 @@ fetch_git() {
   shift 3
   need git git
   dir=$SOURCES/$name-$tag.git
-  expected=$(awk -v g="$name@$tag" '$1 == g { print $2 }' "$LOCK" 2>/dev/null)
+  expected=$(lock_value "$name@$tag")
   if [ -d "$dir/.git" ] && [ -n "$expected" ] && [ "$(git -C "$dir" rev-parse HEAD)" = "$expected" ]; then
     # The folders a recipe asks for may have changed since the clone.
     if [ $# -gt 0 ] && [ "$DRY" != 1 ]; then
@@ -259,7 +274,7 @@ fetch_source() {
   local path=$SOURCES/$file
   expected=$sha256
   if [ -z "$expected" ] && [ -f "$LOCK" ]; then
-    expected=$(awk -v f="$file" '$1 == f { print $2 }' "$LOCK")
+    expected=$(lock_value "$file")
   fi
   if [ -f "$path" ] && [ -n "$expected" ] &&
      [ "$(sha256sum "$path" | cut -d ' ' -f 1)" = "$expected" ]; then
@@ -294,7 +309,7 @@ if [ "$MODE" = release ]; then
 elif [ "$MODE" = get ]; then
   fetch_get
 else
-  [ ${#names[@]} -gt 0 ] || read -r -a names <<< "$(bash "$RECIPES/build.sh" --list | awk '{ printf "%s ", $1 }')"
+  [ ${#names[@]} -gt 0 ] || read -r -a names <<< "$(bash "$RECIPES/build.sh" --list | while read -r n _; do printf '%s ' "$n"; done)"
   for name in "${names[@]}"; do fetch_source "$name"; done
   [ "$DRY" = 1 ] || say next "make packages (offline)"
 fi
