@@ -130,7 +130,11 @@ recipe_build() {
     cmake --build "$deps" -j"$JOBS" )
   local -a host_prgs=()
   [ "$SQ_CROSS" = 1 ] && host_prgs=(-DNLUA0_HOST_PRG="$nlua0_host" -DNVIM_HOST_PRG="$nvim_host")
-  cmake -S . -B build "${android[@]}" -DDEPS_PREFIX="$deps/usr" -DCMAKE_INSTALL_PREFIX="$SQ_PREFIX" \
+  # nlua0, the generators' Lua module, takes Lua's symbols from the program
+  # that loads it; the NDK links a shared library with --no-undefined unless
+  # told (ANDROID_ALLOW_UNDEFINED_SYMBOLS). A program still may not.
+  cmake -S . -B build "${android[@]}" -DANDROID_ALLOW_UNDEFINED_SYMBOLS=ON \
+    -DDEPS_PREFIX="$deps/usr" -DCMAKE_INSTALL_PREFIX="$SQ_PREFIX" \
     -DCMAKE_FIND_ROOT_PATH="$deps/usr" -DENABLE_LIBINTL=OFF -DCOMPILE_LUA=OFF \
     -DLUA_PRG="$lua_gen" -DLUA_GEN_PRG="$lua_gen" "${host_prgs[@]}" $(luajit_at "$deps/usr")
   # A parallel build's error is lost among the other jobs' lines: on a
