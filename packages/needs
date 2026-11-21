@@ -23,3 +23,9 @@ zsh-autosuggestions: zsh
 zsh-syntax-highlighting: zsh
 # git's few shell-script commands run under bash.
 git: bash
+# The SDK's tools. sqmake builds with clang (llvm, which brings the sysroot
+# and the runtimes), and an app's build (sq/build/template.lua) runs sqedit
+# (the background service's manifest), apkpack (the APK) and sqgen (an app's
+# names and layouts). sqedit, apkpack, sqgen and sqdrive are each one static
+# program: they need nothing.
+sqmake: llvm sqedit apkpack sqgen

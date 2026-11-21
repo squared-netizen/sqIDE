@@ -25,6 +25,9 @@ on:
       - packages/runtimes/**
       - packages/apkpack/**
       - packages/sqedit/**
+      - packages/sqmake/**
+      - build.lua
+      - sq/**
       - .github/workflows/apk.yml
   pull_request:
     paths:  # the same list as push
@@ -37,6 +40,9 @@ on:
       - packages/runtimes/**
       - packages/apkpack/**
       - packages/sqedit/**
+      - packages/sqmake/**
+      - build.lua
+      - sq/**
       - .github/workflows/apk.yml
   workflow_dispatch:
     inputs:
@@ -86,10 +92,10 @@ jobs:
             echo "SQ_LLVM_BIN=/usr/lib/llvm-23/bin"
           } >> "$GITHUB_ENV"
 
-      - name: sqedit and apkpack for this machine, at their recipes' tags
+      - name: sqedit, apkpack and sqmake for this machine, at their recipes' tags
         run: |
           set -euo pipefail
-          for name in sqedit apkpack; do
+          for name in sqedit apkpack sqmake; do
             tag=$(bash -c ". packages/$name/recipe.sh; echo \$tag")
             git clone --quiet --depth 1 --branch "$tag" "https://github.com/squared-netizen/$name" "$RUNNER_TEMP/$name"
             make -C "$RUNNER_TEMP/$name" -j4 CXX=clang++ CC=clang AR=llvm-ar "build/$name"
@@ -137,6 +143,32 @@ jobs:
           llvm-readelf -d "$so" | sqedit match -F NEEDED
           ! llvm-readelf -d "$so" | sqedit match -q '"NEEDED" (!("c++" / "unwind") .)* ("c++" / "unwind")'
           ls -l build/*.apk
+
+      # The same APK from build.lua with sqmake (no make, no shell), in a
+      # copy of the tree so make's build/ is left as it was, signed with the
+      # key the make build used. The two must hold the same entries, each
+      # the same but the native library (sqmake's exports less: the static
+      # C++ runtime and FreeType stay inside).
+      - name: The same APK with sqmake (build.lua)
+        run: |
+          set -euo pipefail
+          sqm=$RUNNER_TEMP/sqmake-build
+          mkdir -p "$sqm"
+          git archive HEAD | tar -x -C "$sqm"
+          sqmake --version
+          sqmake -C "$sqm" -j4
+          a=build/sqterm.apk b=$sqm/build/sqterm.apk
+          apkpack verify "$b"
+          diff <(unzip -Z1 "$a" | sort) <(unzip -Z1 "$b" | sort) ||
+            { echo "::error::make's APK and sqmake's hold different entries"; exit 1; }
+          while read -r entry; do
+            case $entry in lib/*) continue ;; esac
+            cmp -s <(unzip -p "$a" "$entry") <(unzip -p "$b" "$entry") ||
+              { echo "::error::$entry differs between make's APK and sqmake's"; exit 1; }
+          done < <(unzip -Z1 "$a")
+          echo "make's APK and sqmake's: the same entries, each the same but lib/"
+          unzip -l "$a" 'lib/*'
+          unzip -l "$b" 'lib/*'
 
       # Run by hand with `release` ticked: two APKs as a prerelease to install
       # on the phone, each with its packages from the `packages` release
