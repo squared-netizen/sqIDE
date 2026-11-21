@@ -132,7 +132,7 @@ recipe_build() {
   [ "$SQ_CROSS" = 1 ] && host_prgs=(-DNLUA0_HOST_PRG="$nlua0_host" -DNVIM_HOST_PRG="$nvim_host")
   cmake -S . -B build "${android[@]}" -DDEPS_PREFIX="$deps/usr" -DCMAKE_INSTALL_PREFIX="$SQ_PREFIX" \
     -DCMAKE_FIND_ROOT_PATH="$deps/usr" -DENABLE_LIBINTL=OFF -DCOMPILE_LUA=OFF \
-    -DLUA_GEN_PRG="$lua_gen" "${host_prgs[@]}" $(luajit_at "$deps/usr")
+    -DLUA_PRG="$lua_gen" -DLUA_GEN_PRG="$lua_gen" "${host_prgs[@]}" $(luajit_at "$deps/usr")
   cmake --build build -j"$JOBS"
   DESTDIR="$dest" cmake --install build
 
