@@ -54,14 +54,18 @@ zstd`) and the NDK the APK builds use; see `packages/README.md`.
 The Makefile's head lists every target.
 
 Or with sqmake, the SDK's build tool, in sqterm itself (`pkg install sqmake
-sqedit apkpack llvm sysroot runtimes`), from `build.lua`, with no make and
-no shell:
+--from repo` brings the rest of the toolchain), from `build.lua`:
 
 ```sh
-sqmake        # build/sqterm.apk, signed with ~/.android/apkpack.pem
+sqmake           # build/sqterm.apk, signed with ~/.android/apkpack.pem
+sqmake install   # install it (with adb on this phone: no prompt)
+sqmake run       # install, then start it (adb)
+sqmake logcat    # its log, and Android's crash lines (adb)
+sqmake devices   # what adb reaches, and how to connect
 ```
 
-It builds the same APK as `make apk`; `sq/build/template.lua` says how.
+It builds the same APK as `make apk` and reaches the device the same way
+(tools/device.sh); `sq/build/template.lua` says how.
 
 ## Layout
 
