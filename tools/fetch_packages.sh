@@ -228,6 +228,24 @@ fetch_get() {
 # Folders after the tag make it a sparse clone of those folders alone, their
 # files fetched as they are checked out (a recipe's `also`: a few folders of
 # a large repository).
+# fetch_commit DIR REPO COMMIT [FOLDER...]: DIR, a clone of only COMMIT
+# (its folders alone when given), checked out; quiet, and false when the
+# server would not serve it.
+fetch_commit() {
+  local dir=$1 repo=$2 commit=$3
+  shift 3
+  git init -q "$dir" &&
+    git -C "$dir" remote add origin "$repo" &&
+    if [ $# -gt 0 ]; then
+      git -C "$dir" fetch -q --depth 1 --filter=blob:none origin "$commit" 2>/dev/null &&
+        git -C "$dir" sparse-checkout set -- "$@"
+    else
+      git -C "$dir" fetch -q --depth 1 origin "$commit" 2>/dev/null
+    fi &&
+    git -c advice.detachedHead=false -C "$dir" checkout -q FETCH_HEAD 2>/dev/null &&
+    [ "$(git -C "$dir" rev-parse HEAD)" = "$commit" ]
+}
+
 fetch_git() {
   local name=$1 repo=$2 tag=$3 dir expected actual
   shift 3
@@ -246,11 +264,19 @@ fetch_git() {
   rm -rf "$dir"
   mkdir -p "$SOURCES"
   say clone "$repo $tag${*:+ ($*)}"
-  if [ $# -gt 0 ]; then
+  # With the commit already in sources.lock, that commit itself, fetched
+  # by its id: what the lock says is what arrives, and no annotated tag is
+  # fetched (a shallow clone at one makes git say "... is not a commit!").
+  # A server that serves no commit by id: the tag, as below.
+  if [ -n "$expected" ] && fetch_commit "$dir" "$repo" "$expected" "$@"; then
+    :
+  elif [ $# -gt 0 ]; then
+    rm -rf "$dir"
     git -c advice.detachedHead=false clone -q --depth 1 --filter=blob:none --sparse --branch "$tag" "$repo" "$dir" &&
       git -C "$dir" sparse-checkout set -- "$@" ||
       fail "$name: could not clone $* of $repo at $tag"
   else
+    rm -rf "$dir"
     git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$repo" "$dir" ||
       fail "$name: could not clone $repo at $tag"
   fi
