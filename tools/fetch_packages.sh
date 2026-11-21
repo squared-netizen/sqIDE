@@ -19,6 +19,12 @@
 #                                              sqterm, pkg install NAME, or
 #                                              pkg upgrade, offline
 #   tools/fetch_packages.sh --dry-run [...]    say what it would download
+#   tools/fetch_packages.sh --bundle SET       which packages go in the APK
+#                                              (SQ_BUNDLE): default, the
+#                                              bundled=yes ones; basic, zsh
+#                                              and pkg (and ncurses, their
+#                                              terminfo); all, every package
+#                                              (about 110 MB)
 #
 # The packages: CI (.github/workflows/packages.yml) builds each package once
 # per key (`bash packages/build.sh --keys`: a sha256 of its recipe, what it
@@ -69,19 +75,22 @@ get() { curl -fsSL --retry 3 --connect-timeout 20 -o "$1" "$2"; }
 
 MODE=release
 DRY=0
+BUNDLE=${SQ_BUNDLE:-default}
 names=()
 while [ $# -gt 0 ]; do
   case $1 in
     --sources) MODE=sources ;;
     --get) MODE=get ;;
     --dry-run) DRY=1 ;;
-    -h | --help) head -n 38 "$0" | tail -n +2; exit 0 ;;
+    --bundle) [ $# -ge 2 ] || fail "--bundle default|basic|all"; BUNDLE=$2; shift ;;
+    -h | --help) head -n 44 "$0" | tail -n +2; exit 0 ;;
     -*) fail "unknown option: $1 (see --help)" ;;
     *) [ -f "$RECIPES/$1/recipe.sh" ] || fail "no recipe: packages/$1/recipe.sh"
        names+=("$1") ;;
   esac
   shift
 done
+case $BUNDLE in default | basic | all) ;; *) fail "--bundle is default, basic or all, not $BUNDLE" ;; esac
 if [ "$MODE" = get ]; then
   [ ${#names[@]} -ge 1 ] || fail "--get NAME..."
 elif [ ${#names[@]} -gt 0 ] && [ "$MODE" != sources ]; then
@@ -95,9 +104,14 @@ fetch_release() {
   local -a wanted=()
   local bundled
   while read -r name version key bundled; do
-    [ "$bundled" = no ] || wanted+=("$name $version $key")
+    case $BUNDLE in
+      all) ;;
+      basic) case $name in ncurses | zsh | pkg) ;; *) continue ;; esac ;;
+      *) [ "$bundled" != no ] || continue ;;
+    esac
+    wanted+=("$name $version $key")
   done < <(bash "$RECIPES/build.sh" --keys)
-  say release "packages ($SQ_PACKAGES_URL)"
+  say release "packages ($SQ_PACKAGES_URL), bundle: $BUNDLE"
   if [ "$DRY" = 1 ]; then
     for line in "${wanted[@]}"; do read -r name version key <<< "$line"; say would "$name-$version-$key.tar.zst"; done
     return
