@@ -64,6 +64,7 @@ sqmake logcat    # its log, and Android's crash lines (adb)
 sqmake devices   # what adb reaches, and how to connect
 sqmake --debug install   # make dev's build: the Console, DEV_LOG, debuggable
                          # (in build/debug, so switching rebuilds neither)
+sqmake console           # that build's Console, here (sqconsole)
 ```
 
 It builds the same APK as `make apk` and reaches the device the same way
