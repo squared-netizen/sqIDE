@@ -24,9 +24,9 @@ DEV_LOG and the Console, without logcat.
 ## The parts
 
 ```
-sqmake run ─► squared/build/android.lua ─► device tool ─► sqterm (the app)
-                (verbs: what run means)     `sqterm-device`   PackageInstaller,
-                                            (a command)       startActivity
+sqmake run ─► squared/build/android.lua ─► sqterm-install ─► sqterm (the app)
+                (verbs: what run means)     sqterm-launch     PackageInstaller,
+                                            (commands)        startActivity
 ```
 
 1. **The app's side**, in sqterm (`sq_android/`): a small service on a Unix
@@ -35,22 +35,37 @@ sqmake run ─► squared/build/android.lua ─► device tool ─► sqterm (th
    shell and tool in sqterm runs as; nothing else on the phone can reach it.
    It answers one JSON request with one JSON response, as the SDK's tools do
    (squared's `docs/developer/sdk-tools.md`), through sq.data.
-2. **The command**, `sqterm-device`: the device tool's interface, the same
-   commands as `tools/device.sh` (`install APK`, `run APK PACKAGE`,
-   `uninstall PACKAGE`, `devices`; `logcat TAG` says it needs adb and hands
-   over to `tools/device.sh`). It sends requests to the socket and prints
-   what comes back. A static C++23 program, packaged like sqedit.
-3. **The platform file** (`squared/build/android.lua`) picks the device
-   tool: `sqterm-device` when it runs inside sqterm (`SQTERM=1`) and the
-   command is installed, else `tools/device.sh`. A project's `app.device`
-   still wins. Nothing else changes: not sqmake, not the template.
+2. **The commands**, one job each, named as Termux names its own
+   (`termux-open`, `termux-usb`): each sends one request to the socket and
+   prints what comes back, and each is useful without sqmake.
+
+   | command | does |
+   |---|---|
+   | `sqterm-open PATH\|URL` | hands a file or link to Android (an APK: the installer, as `termux-open`) |
+   | `sqterm-install APK` | installs, and waits for Android's answer |
+   | `sqterm-uninstall PACKAGE` | Android asks, then it is gone |
+   | `sqterm-launch PACKAGE` | starts an installed app (its launcher activity) |
+   | `sqterm-usb` | a USB device, by Android's permission prompt (as `termux-usb`) |
+   | `sqterm-adb` | adb to a USB device through `sqterm-usb` (as `termux-adb`): logcat with no Wi-Fi |
+
+   One static C++23 program, packaged like sqedit, installed under each
+   name (it reads `argv[0]`), so the family stays one package.
+3. **The platform file** (`squared/build/android.lua`): inside sqterm
+   (`SQTERM=1`, the commands installed) `install` is `sqterm-install`,
+   `run` is `sqterm-install` then `sqterm-launch`, `uninstall` is
+   `sqterm-uninstall`; `logcat` and `devices` stay adb's (`tools/device.sh`,
+   which can reach adb through `sqterm-adb`). Elsewhere, `tools/device.sh`
+   as now. A project's `app.device` still wins. Nothing else changes: not
+   sqmake, not the template.
 
 ## The requests
 
 ```json
+{"sq": 1, "command": "open", "args": {"target": "/abs/path/file.pdf"}}
 {"sq": 1, "command": "install", "args": {"apk": "/abs/path/build/game.apk"}}
-{"sq": 1, "command": "start", "args": {"package": "dev.me.game"}}
+{"sq": 1, "command": "launch", "args": {"package": "dev.me.game"}}
 {"sq": 1, "command": "uninstall", "args": {"package": "dev.me.game"}}
+{"sq": 1, "command": "usb", "args": {"device": "/dev/bus/usb/001/002"}}
 {"sq": 1, "command": "status", "args": {}}
 ```
 
@@ -59,6 +74,9 @@ sqmake run ─► squared/build/android.lua ─► device tool ─► sqterm (th
 status and message (`STATUS_FAILURE_CONFLICT`: signed with another key;
 `STATUS_FAILURE_ABORTED`: the person said no). `status` says whether
 sqterm may install at all (below), so `sqmake devices` can say what to do.
+`usb` answers with a file descriptor for the device, passed over the socket
+(SCM_RIGHTS), after Android's permission prompt: what `sqterm-adb` and
+libusb need.
 
 ## How the app does each, with no Java
 
@@ -74,6 +92,11 @@ the activity's VM.
   passes to native code). `STATUS_PENDING_USER_ACTION` carries Android's
   confirmation screen, which sqterm starts; the final status arrives the
   same way, and the request is answered then.
+- **Open**: an ACTION_VIEW intent. A file is offered through a small
+  ContentProvider in the shim dex (one class, read-only, for the one file
+  named), since Android gives other apps no file:// paths.
+- **USB**: `UsbManager.requestPermission`, then `openDevice`; its file
+  descriptor goes back over the socket.
 - **Start**: `PackageManager.getLaunchIntentForPackage`, then
   `startActivity`. sqterm is in front when the person types, so Android
   lets it start another app.
@@ -100,14 +123,16 @@ decision (the foreground service rules, storage access).
 ## Order of work
 
 1. The shim's `onNewIntent` (squared, dexgen), and the manifest permissions.
-2. The socket service in `sq_android/`, with `status` and `start` first
+2. The socket service in `sq_android/`, with `status` and `launch` first
    (no confirmation flow), then `install` and `uninstall`.
-3. `sqterm-device` (a package), and `squared/build/android.lua` choosing it.
+3. The commands (one package), `sqterm-launch` and `sqterm-install` first,
+   and `squared/build/android.lua` using them inside sqterm.
 4. On the phone: `sqmake run` with Wireless debugging off.
+5. Later: `sqterm-open` (the ContentProvider), then `sqterm-usb` and
+   `sqterm-adb`.
 
 ## Questions for review
 
-- The command's name: `sqterm-device`, or a general `sqterm` command with
-  more uses later (`sqterm open FILE`, `sqterm share`)?
+- Decided: the commands are named as Termux's are, `sqterm-*`, one job each.
 - Is one tap per install acceptable for now, or should raising sqterm's
   target SDK come first?
