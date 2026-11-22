@@ -9,6 +9,13 @@ the tools in use, C, C++ or Lua only. GitHub Actions builds them with the same
 script (`.github/workflows/packages.yml`, decided 2026-11-04) and publishes
 them as a release.
 
+**Two kinds of package.** What `pkg` installs here are *sqterm packages*:
+programs and files for sqterm's prefix (zsh, llvm, sqmake, sqedit, and
+`squared`, which carries squared's sources for every workspace to build
+against). In squared, a *package* means only the framework, squared-core, and
+its add-on packages, `squared-`*name*. The `squared` sqterm package is how the
+framework reaches the phone; it is not itself a squared package.
+
 **Offline.** No build makes a network request: `make packages` and
 `packages/build.sh` work from what is already on disk. The one step that
 downloads is `tools/fetch_packages.sh`, run on purpose: CI's packages, or the
