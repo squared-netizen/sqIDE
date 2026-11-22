@@ -62,6 +62,8 @@ sqmake install   # install it (with adb on this phone: no prompt)
 sqmake run       # install, then start it (adb)
 sqmake logcat    # its log, and Android's crash lines (adb)
 sqmake devices   # what adb reaches, and how to connect
+sqmake --debug install   # make dev's build: the Console, DEV_LOG, debuggable
+                         # (in build/debug, so switching rebuilds neither)
 ```
 
 It builds the same APK as `make apk` and reaches the device the same way
