@@ -61,6 +61,8 @@ sqgen/            squared's layout compiler (MIT): names.json and layouts/
                   build, for the build machine, first) from squared/
 sqconsole/        squared's Console client (MIT): a debug build's Console in
                   this terminal (sqmake console); built as sqgen is
+squared/          the squared framework's sources (MIT), for every workspace to
+                  build with: share/squared/VERSION/squared (sq/build/template.lua)
 sqterm-tools/     sqterm's own: the sqterm-* commands (sqterm-launch, ...),
                   clients of the API the app serves (docs/install-api.md)
 neovim/           neovim 0.12.6 (Apache-2.0 and Vim): nvim, its runtime
