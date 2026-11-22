@@ -48,6 +48,13 @@
          builds had it.) -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- sqterm-install and sqterm-uninstall (docs/install-api.md): installing
+         and removing apps through PackageInstaller, which Android confirms
+         with the person each time. The first install sends them to Settings,
+         "Install unknown apps", to allow sqterm once. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
@@ -81,5 +88,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- dev.squared.ResultReceiver: where Android sends an install's or an
+             uninstall's result (PackageInstaller's IntentSender), whose
+             onReceive is native (sq_android/api.cpp). Not exported: only
+             the PendingIntent sqterm made can reach it. -->
+        <receiver
+            android:name="dev.squared.ResultReceiver"
+            android:exported="false" />
     </application>
 </manifest>

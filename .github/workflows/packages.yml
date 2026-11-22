@@ -24,6 +24,7 @@ on:
       - packages/**
       - terminfo/sqterm.ti
       - sq_app/pkg/**
+      - sq_app/cli/**
       - sq_app/src/unpack.cpp
       - sq_app/src/unpack.hpp
       - sq_app/src/unpack_cartridge.cpp
@@ -45,6 +46,7 @@ on:
       - packages/**
       - terminfo/sqterm.ti
       - sq_app/pkg/**
+      - sq_app/cli/**
       - sq_app/src/unpack.cpp
       - sq_app/src/unpack.hpp
       - sq_app/src/unpack_cartridge.cpp

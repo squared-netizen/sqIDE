@@ -47,6 +47,7 @@
 #include <unistd.h>
 
 #include "android_text.hpp"
+#include "api.hpp"
 #include "background.hpp"
 
 import sq.app;
@@ -2232,6 +2233,9 @@ extern "C" JNIEXPORT void squared_on_create(ANativeActivity* activity, void* sav
     static_cast<void>(sq_android::background().attach(activity));
     // A paste, and the Paste key: SquaredActivity's dispatchKeyEvent.
     attach_keyboard(activity);
+    // sqterm's API for the sqterm-* commands (docs/install-api.md), once a
+    // process: launching apps from the shell, with no adb.
+    static_cast<void>(sq_android::api().start(activity));
     ANativeActivity_onCreate(activity, saved_state, saved_state_size);
     glue_on_destroy = activity->callbacks->onDestroy;
     activity->callbacks->onDestroy = squared_on_destroy;

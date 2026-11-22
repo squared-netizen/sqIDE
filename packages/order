@@ -14,6 +14,7 @@ llvm
 sysroot
 runtimes
 pkg
+sqterm-tools
 llvm-tools
 lldb
 sqdrive

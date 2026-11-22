@@ -87,11 +87,13 @@ the activity's VM.
 - **Install**: `PackageInstaller` sessions. Create a session, write the
   APK's bytes into it (`openWrite`, from native code: no file has to be
   shared, so no FileProvider and no content:// URI), then commit with an
-  IntentSender. The IntentSender is a PendingIntent for SquaredActivity
-  itself: the result arrives as a new intent (`onNewIntent`, which the shim
-  passes to native code). `STATUS_PENDING_USER_ACTION` carries Android's
-  confirmation screen, which sqterm starts; the final status arrives the
-  same way, and the request is answered then.
+  IntentSender. The IntentSender is a PendingIntent to squared's shim
+  receiver, `dev.squared.ResultReceiver`, whose `onReceive` is native: the
+  result arrives whether or not sqterm is in front, and brings nothing to
+  the front (the activity's `onNewIntent` would, `singleTask` as it is).
+  `STATUS_PENDING_USER_ACTION` carries Android's confirmation screen, which
+  sqterm starts; the final status arrives the same way, and the request is
+  answered then.
 - **Open**: an ACTION_VIEW intent. A file is offered through a small
   ContentProvider in the shim dex (one class, read-only, for the one file
   named), since Android gives other apps no file:// paths.
@@ -103,8 +105,9 @@ the activity's VM.
 - **Uninstall**: `PackageInstaller.uninstall` with the same IntentSender;
   Android asks.
 
-What the shim dex needs: SquaredActivity's `onNewIntent` passing the
-intent's extras to native code (dexgen writes it; a few hundred bytes).
+What the shim dex needs: `dev.squared.ResultReceiver`, a BroadcastReceiver
+whose `onReceive(Context, Intent)` is native (dexgen writes it; 256 bytes
+more in the dex).
 What the manifest needs: `REQUEST_INSTALL_PACKAGES` (and
 `REQUEST_DELETE_PACKAGES`). The first time, Android sends the person to
 Settings, "Install unknown apps", to allow sqterm; `status` reports
@@ -122,7 +125,8 @@ decision (the foreground service rules, storage access).
 
 ## Order of work
 
-1. The shim's `onNewIntent` (squared, dexgen), and the manifest permissions.
+1. The shim's `ResultReceiver` (squared, dexgen), and the manifest
+   permissions and receiver.
 2. The socket service in `sq_android/`, with `status` and `launch` first
    (no confirmation flow), then `install` and `uninstall`.
 3. The commands (one package), `sqterm-launch` and `sqterm-install` first,
