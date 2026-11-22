@@ -59,6 +59,8 @@ sqmake/           sqmake 0.8.0 (MIT): the SDK's build system, build.lua in
 sqgen/            squared's layout compiler (MIT): names.json and layouts/
                   into C++ for an app's build; built with sqmake (its own
                   build, for the build machine, first) from squared/
+sqconsole/        squared's Console client (MIT): a debug build's Console in
+                  this terminal (sqmake console); built as sqgen is
 neovim/           neovim 0.12.6 (Apache-2.0 and Vim): nvim, its runtime
                   files and tree-sitter parsers, its libraries built in
                   (cmake.deps, from the recipe's `extra` files); CMake on the
