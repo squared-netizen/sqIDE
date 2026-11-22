@@ -1,6 +1,6 @@
 # Installing and starting apps from sqterm (draft)
 
-Status: a proposal, for review. Nothing here is built yet.
+Status: agreed (2026-11-22). Nothing here is built yet.
 
 ## What it is for
 
@@ -131,8 +131,8 @@ decision (the foreground service rules, storage access).
 5. Later: `sqterm-open` (the ContentProvider), then `sqterm-usb` and
    `sqterm-adb`.
 
-## Questions for review
+## Decisions
 
 - Decided: the commands are named as Termux's are, `sqterm-*`, one job each.
-- Is one tap per install acceptable for now, or should raising sqterm's
-  target SDK come first?
+- Decided: one tap per install is fine for now; raising sqterm's target
+  SDK is its own decision, later.
