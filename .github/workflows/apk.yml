@@ -201,5 +201,5 @@ jobs:
             ls -l "$apk"
           done
           gh release create "$tag" "${files[@]}" --prerelease --target "$GITHUB_SHA" \
-            --title "sqterm $tag (arm64-v8a, test)" \
+            --title "sqterm $(date -u '+%Y-%m-%d %H:%M') UTC $tag (arm64-v8a, test)" \
             --notes "Test builds of $GITHUB_SHA for arm64-v8a, API 28 and later. basic: zsh and pkg (pkg installs the rest). all: every package bundled. Signed with the squared key, certificate SHA-256 $want (SIGNING.md): apkpack verify prints it."
