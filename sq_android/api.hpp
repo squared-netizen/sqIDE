@@ -45,6 +45,8 @@ private:
     void serve(std::stop_token stop) noexcept;
     void answer(int connection, JNIEnv* env) noexcept;
     std::string handle(std::string_view request, JNIEnv* env) noexcept;
+    /// The installed APK's path (Context.getPackageCodePath), or "".
+    std::string apk_path(JNIEnv* env) noexcept;
     /// Starts the package's launcher activity: "" when it did, else why not.
     std::string launch(JNIEnv* env, const std::string& package) noexcept;
 
