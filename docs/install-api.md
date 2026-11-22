@@ -1,6 +1,10 @@
 # Installing and starting apps from sqterm (draft)
 
-Status: agreed (2026-11-22). Nothing here is built yet.
+Status: agreed (2026-11-22). Built: `status`, `launch`, `install` and
+`uninstall` in the app, and `sqterm-api`, `sqterm-launch`, `sqterm-install`
+and `sqterm-uninstall` (the sqterm-tools sqterm package, version 2); squared's
+`build/android.lua` uses them inside sqterm. Still to do: `open`, `usb` and
+`sqterm-adb`.
 
 ## What it is for
 
@@ -69,10 +73,11 @@ sqmake run ─► squared/build/android.lua ─► sqterm-install ─► sqterm 
 {"sq": 1, "command": "status", "args": {}}
 ```
 
-`install` answers when Android has finished: `{"ok": true, "result":
+`install` takes the APK's absolute path (`sqterm-install` makes it so) and
+answers when Android has finished: `{"ok": true, "result":
 {"package": ..., "version_code": ...}}`, or an error with Android's own
 status and message (`STATUS_FAILURE_CONFLICT`: signed with another key;
-`STATUS_FAILURE_ABORTED`: the person said no). `status` says whether
+`STATUS_FAILURE_ABORTED`: the person said no). `status` says, as `can_install`, whether
 sqterm may install at all (below), so `sqmake devices` can say what to do.
 `usb` answers with a file descriptor for the device, passed over the socket
 (SCM_RIGHTS), after Android's permission prompt: what `sqterm-adb` and

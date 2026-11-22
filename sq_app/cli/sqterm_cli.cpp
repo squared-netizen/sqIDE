@@ -2,6 +2,9 @@
 // it does (argv[0]), each a client of sqterm's API, the Unix socket the app
 // serves at $PREFIX/var/run/sqterm.sock (sq_android/api.cpp).
 //
+//   sqterm-install APK       install an APK (Android asks the person first),
+//                            and wait for Android's answer
+//   sqterm-uninstall PACKAGE uninstall an app (Android asks)
 //   sqterm-launch PACKAGE    start an installed app (its launcher activity)
 //   sqterm-api JSON          one request as given, its response printed
 //                            (what the commands are made of; for testing)
@@ -12,6 +15,7 @@
 // (not in sqterm, or an older sqterm).
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,7 +37,9 @@ std::string program = "sqterm";
 
 int usage() {
     std::fprintf(stderr,
-                 "usage: sqterm-launch PACKAGE    start an installed app\n"
+                 "usage: sqterm-install APK       install an APK (Android asks first)\n"
+                 "       sqterm-uninstall PACKAGE uninstall an app (Android asks)\n"
+                 "       sqterm-launch PACKAGE    start an installed app\n"
                  "       sqterm-api JSON          one request to sqterm's API, its response\n");
     return 2;
 }
@@ -102,8 +108,10 @@ std::string request_of(const char* command, const char* key, const char* value) 
     return out;
 }
 
-/// Exits as the response says: 0 ok, 1 an error (its message said).
-int outcome(const std::string& response, const char* done) {
+/// Exits as the response says: 0 ok, 1 an error (its message said). On ok,
+/// `done` is printed, with the result's package and version_code after it
+/// when `with_result`.
+int outcome(const std::string& response, const char* done, bool with_result = false) {
     yyjson_doc* doc = yyjson_read(response.data(), response.size(), 0);
     yyjson_val* root = doc != nullptr ? yyjson_doc_get_root(doc) : nullptr;
     if (root == nullptr) {
@@ -113,7 +121,16 @@ int outcome(const std::string& response, const char* done) {
     }
     const bool ok = yyjson_get_bool(yyjson_obj_get(root, "ok"));
     if (ok) {
-        if (done != nullptr) std::printf("%s: %s\n", program.c_str(), done);
+        if (done != nullptr) {
+            yyjson_val* result = yyjson_obj_get(root, "result");
+            const char* package = with_result ? yyjson_get_str(yyjson_obj_get(result, "package")) : nullptr;
+            yyjson_val* code = with_result ? yyjson_obj_get(result, "version_code") : nullptr;
+            std::printf("%s: %s", program.c_str(), done);
+            if (package != nullptr) std::printf(" %s", package);
+            if (code != nullptr && yyjson_is_int(code))
+                std::printf(" (version %lld)", static_cast<long long>(yyjson_get_sint(code)));
+            std::printf("\n");
+        }
     } else {
         yyjson_val* error = yyjson_obj_get(root, "error");
         const char* message = yyjson_get_str(yyjson_obj_get(error, "message"));
@@ -142,12 +159,31 @@ int main(int argc, char** argv) {
         const std::string done = std::string("started ") + argv[1];
         return outcome(response, done.c_str());
     }
+    if (name == "sqterm-install") {
+        if (argc != 2) return usage();
+        // The app reads the file itself: an absolute path, whatever the
+        // shell's directory.
+        char path[PATH_MAX];
+        if (::realpath(argv[1], path) == nullptr) {
+            std::fprintf(stderr, "%s: %s: %s\n", program.c_str(), argv[1], std::strerror(errno));
+            return 1;
+        }
+        std::fprintf(stderr, "%s: asking Android to install %s (confirm on the screen)\n", program.c_str(), path);
+        if (!ask(request_of("install", "apk", path), response)) return 2;
+        return outcome(response, "installed", true);
+    }
+    if (name == "sqterm-uninstall") {
+        if (argc != 2) return usage();
+        std::fprintf(stderr, "%s: asking Android to uninstall %s (confirm on the screen)\n", program.c_str(), argv[1]);
+        if (!ask(request_of("uninstall", "package", argv[1]), response)) return 2;
+        return outcome(response, "uninstalled", true);
+    }
     if (name == "sqterm-api") {
         if (argc != 2) return usage();
         if (!ask(argv[1], response)) return 2;
         std::fputs(response.c_str(), stdout);
         return outcome(response, nullptr);
     }
-    std::fprintf(stderr, "%s: not one of the sqterm-* commands (sqterm-launch, sqterm-api)\n", program.c_str());
+    std::fprintf(stderr, "%s: not one of the sqterm-* commands (sqterm-install, sqterm-uninstall, sqterm-launch, sqterm-api)\n", program.c_str());
     return 2;
 }
