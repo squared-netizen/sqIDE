@@ -24,6 +24,42 @@ constexpr jint kFrame = 32;
 constexpr jint kFlagActivityNewTask = 0x10000000;  // Intent.FLAG_ACTIVITY_NEW_TASK
 constexpr std::size_t kRequestLimit = 64 * 1024;
 constexpr int kRequestTimeoutMs = 5000;
+constexpr int kFlagUpdateCurrent = 0x08000000;  // PendingIntent.FLAG_UPDATE_CURRENT
+constexpr int kFlagMutable = 0x02000000;        // PendingIntent.FLAG_MUTABLE (API 31): Android fills in the status
+constexpr int kStatusPendingUserAction = -1;    // PackageInstaller.STATUS_PENDING_USER_ACTION
+constexpr int kStatusSuccess = 0;               // PackageInstaller.STATUS_SUCCESS
+constexpr const char* kReceiver = "dev.squared.ResultReceiver";
+constexpr const char* kRequestExtra = "dev.squared.sqterm.REQUEST";  // which request a result answers
+constexpr auto kAnswerTimeout = std::chrono::minutes(10);  // a person is deciding
+
+/// PackageInstaller.STATUS_* by name, for the error's code.
+std::string status_name(int status) {
+    switch (status) {
+        case 0: return "STATUS_SUCCESS";
+        case 1: return "STATUS_FAILURE";
+        case 2: return "STATUS_FAILURE_BLOCKED";
+        case 3: return "STATUS_FAILURE_ABORTED";
+        case 4: return "STATUS_FAILURE_INVALID";
+        case 5: return "STATUS_FAILURE_CONFLICT";
+        case 6: return "STATUS_FAILURE_STORAGE";
+        case 7: return "STATUS_FAILURE_INCOMPATIBLE";
+        case 8: return "STATUS_FAILURE_TIMEOUT";
+        default: return "STATUS_" + std::to_string(status);
+    }
+}
+
+/// What each status means to the person at the keyboard.
+std::string status_hint(int status) {
+    switch (status) {
+        case 3: return "cancelled";
+        case 5: return "an app with this package is installed, signed with another key: uninstall it first";
+        case 4: return "not a valid APK";
+        case 6: return "not enough storage";
+        case 7: return "not for this phone (its ABI or Android version)";
+        case 2: return "blocked: allow sqterm in Settings, Install unknown apps";
+        default: return {};
+    }
+}
 
 void say(const char* what, const std::string& detail = {}) noexcept {
     __android_log_print(ANDROID_LOG_INFO, "sqterm", "api: %s%s%s", what, detail.empty() ? "" : " ", detail.c_str());
@@ -77,6 +113,25 @@ std::string take_exception(JNIEnv* env) {
     return text;
 }
 
+/// A Java string's UTF-8; "" for null.
+std::string string_of(JNIEnv* env, jobject value) {
+    if (value == nullptr) return {};
+    auto s = static_cast<jstring>(value);
+    const char* chars = env->GetStringUTFChars(s, nullptr);
+    if (chars == nullptr) return {};
+    std::string text = chars;
+    env->ReleaseStringUTFChars(s, chars);
+    return text;
+}
+
+/// True (and why, if nothing else said it) when a Java call threw.
+bool thrown(JNIEnv* env, std::string& why) {
+    std::string e = take_exception(env);
+    if (e.empty()) return false;
+    if (why.empty()) why = std::move(e);
+    return true;
+}
+
 bool make_directories(const std::string& dir) {
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
@@ -106,6 +161,7 @@ bool Api::start(ANativeActivity* activity) noexcept {
         say("no application context", thrown);
         return false;
     }
+    receiver_ = register_receiver(activity);
 
     // The prefix's var/run/: files/usr, as the shell's $PREFIX (prefix.cpp).
     if (activity->internalDataPath == nullptr) return false;
@@ -196,8 +252,14 @@ std::string Api::handle(std::string_view request, JNIEnv* env) noexcept {
     const JsonValue* args = r.find("args");
 
     if (*name == "status") {
-        JsonValue::Object result{{"commands", JsonValue(JsonValue::Array{JsonValue("status"), JsonValue("launch")})},
-                                 {"api_level", JsonValue(std::int64_t{api_level_})}};
+        JsonValue::Array commands{JsonValue("status"), JsonValue("launch")};
+        if (receiver_) {
+            commands.emplace_back("install");
+            commands.emplace_back("uninstall");
+        }
+        JsonValue::Object result{{"commands", JsonValue(std::move(commands))},
+                                 {"api_level", JsonValue(std::int64_t{api_level_})},
+                                 {"can_install", JsonValue(can_install(env))}};
         // The installed APK: `apkpack verify` on it says which key signed it.
         if (const std::string apk = apk_path(env); !apk.empty()) result.emplace("apk", JsonValue(apk));
         return ok(JsonValue(std::move(result)));
@@ -210,7 +272,33 @@ std::string Api::handle(std::string_view request, JNIEnv* env) noexcept {
         if (!why.empty()) return fail("not_launched", why);
         return ok(JsonValue(JsonValue::Object{{"package", JsonValue(*p)}}));
     }
-    return fail("unknown_command", *name + ": sqterm's API answers status and launch");
+    if (*name == "install" || *name == "uninstall") {
+        if (!receiver_) return fail("unavailable", "this sqterm has no dev.squared.ResultReceiver: install a newer sqterm");
+        const bool installing = *name == "install";
+        const JsonValue* what = args != nullptr ? args->find(installing ? "apk" : "package") : nullptr;
+        const std::string* w = what != nullptr ? what->string_if() : nullptr;
+        if (installing && (w == nullptr || w->empty() || w->front() != '/'))
+            return fail("bad_request", "install: args.apk, the APK's absolute path");
+        if (!installing && (w == nullptr || !good_package(*w)))
+            return fail("bad_request", "uninstall: args.package, a package name");
+        std::string why;
+        const auto outcome = installing ? install(env, *w, why) : uninstall(env, *w, why);
+        if (!outcome) return fail(installing ? "not_installed" : "not_uninstalled", why);
+        if (outcome->status != kStatusSuccess) {
+            std::string message = outcome->message;
+            if (const std::string hint = status_hint(outcome->status); !hint.empty())
+                message = message.empty() ? hint : hint + " (" + message + ")";
+            return fail(status_name(outcome->status), message.empty() ? "Android said no" : message);
+        }
+        JsonValue::Object result;
+        const std::string package = outcome->package.empty() && !installing ? *w : outcome->package;
+        if (!package.empty()) result.emplace("package", JsonValue(package));
+        if (installing && !package.empty()) {
+            if (const auto code = version_code(env, package)) result.emplace("version_code", JsonValue(*code));
+        }
+        return ok(JsonValue(std::move(result)));
+    }
+    return fail("unknown_command", *name + ": sqterm's API answers status, launch, install and uninstall");
 }
 
 std::string Api::apk_path(JNIEnv* env) noexcept {
@@ -254,6 +342,295 @@ std::string Api::launch(JNIEnv* env, const std::string& package) noexcept {
     env->PopLocalFrame(nullptr);
     say(why.empty() ? "launched" : "not launched", why.empty() ? package : package + ": " + why);
     return why;
+}
+
+bool Api::register_receiver(ANativeActivity* activity) noexcept {
+    JNIEnv* env = activity->env;
+    if (env->PushLocalFrame(kFrame) != JNI_OK) return false;
+    bool done = false;
+    std::string why;
+    // The app's class loader: FindClass would use NativeActivity's (the
+    // system's), which has never heard of the shim (as background.cpp).
+    jclass activity_class = env->GetObjectClass(activity->clazz);
+    jmethodID get_loader = env->GetMethodID(activity_class, "getClassLoader", "()Ljava/lang/ClassLoader;");
+    jobject loader = get_loader != nullptr ? env->CallObjectMethod(activity->clazz, get_loader) : nullptr;
+    jclass loader_class = env->FindClass("java/lang/ClassLoader");
+    jmethodID load = loader_class != nullptr
+                         ? env->GetMethodID(loader_class, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;")
+                         : nullptr;
+    if (!thrown(env, why) && loader != nullptr && load != nullptr) {
+        auto shim = static_cast<jclass>(env->CallObjectMethod(loader, load, env->NewStringUTF(kReceiver)));
+        if (!thrown(env, why) && shim != nullptr) {
+            const JNINativeMethod native{"onReceive", "(Landroid/content/Context;Landroid/content/Intent;)V",
+                                         reinterpret_cast<void*>(&Api::on_receive)};
+            done = env->RegisterNatives(shim, &native, 1) == JNI_OK;
+            thrown(env, why);
+        }
+    }
+    env->PopLocalFrame(nullptr);
+    say(done ? "dev.squared.ResultReceiver registered: install and uninstall"
+             : "no dev.squared.ResultReceiver: install and uninstall unavailable",
+        why);
+    return done;
+}
+
+void Api::on_receive(JNIEnv* env, jobject /*receiver*/, jobject /*context*/, jobject intent) {
+    Api& self = api();
+    if (intent == nullptr || env->PushLocalFrame(kFrame) != JNI_OK) return;
+    std::string why;
+    jclass intent_class = env->GetObjectClass(intent);
+    jmethodID get_int = env->GetMethodID(intent_class, "getIntExtra", "(Ljava/lang/String;I)I");
+    jmethodID get_string = env->GetMethodID(intent_class, "getStringExtra", "(Ljava/lang/String;)Ljava/lang/String;");
+    const int id = env->CallIntMethod(intent, get_int, env->NewStringUTF(kRequestExtra), 0);
+    Outcome outcome;
+    outcome.status = env->CallIntMethod(intent, get_int, env->NewStringUTF("android.content.pm.extra.STATUS"), 1);
+    outcome.message =
+        string_of(env, env->CallObjectMethod(intent, get_string, env->NewStringUTF("android.content.pm.extra.STATUS_MESSAGE")));
+    outcome.package =
+        string_of(env, env->CallObjectMethod(intent, get_string, env->NewStringUTF("android.content.pm.extra.PACKAGE_NAME")));
+    thrown(env, why);
+    if (outcome.status == kStatusPendingUserAction) {
+        // Android's own screen, "Do you want to install this app?": start it
+        // and wait for the final status, which comes here again.
+        jmethodID get_parcelable =
+            env->GetMethodID(intent_class, "getParcelableExtra", "(Ljava/lang/String;)Landroid/os/Parcelable;");
+        jobject confirm = env->CallObjectMethod(intent, get_parcelable, env->NewStringUTF("android.intent.extra.INTENT"));
+        if (!thrown(env, why) && confirm != nullptr) {
+            jclass confirm_class = env->GetObjectClass(confirm);
+            jmethodID add_flags = env->GetMethodID(confirm_class, "addFlags", "(I)Landroid/content/Intent;");
+            env->CallObjectMethod(confirm, add_flags, kFlagActivityNewTask);
+            jclass context_class = env->GetObjectClass(self.context_);
+            jmethodID start = env->GetMethodID(context_class, "startActivity", "(Landroid/content/Intent;)V");
+            env->CallVoidMethod(self.context_, start, confirm);
+            if (!thrown(env, why)) {
+                say("asking the person", std::to_string(id));
+                env->PopLocalFrame(nullptr);
+                return;
+            }
+        }
+        outcome.status = 1;
+        outcome.message = why.empty() ? "Android's confirmation could not be shown" : why;
+    }
+    env->PopLocalFrame(nullptr);
+    say("result", std::to_string(id) + " " + status_name(outcome.status) + " " + outcome.message);
+    {
+        const std::lock_guard lock(self.results_mutex_);
+        self.results_[id] = std::move(outcome);
+    }
+    self.results_changed_.notify_all();
+}
+
+std::optional<Api::Outcome> Api::wait_for(int id) noexcept {
+    std::unique_lock lock(results_mutex_);
+    if (!results_changed_.wait_for(lock, kAnswerTimeout, [&] { return results_.contains(id); })) return std::nullopt;
+    Outcome outcome = std::move(results_.at(id));
+    results_.erase(id);
+    return outcome;
+}
+
+jobject Api::result_sender(JNIEnv* env, int id) noexcept {
+    jclass intent_class = env->FindClass("android/content/Intent");
+    jobject intent = env->NewObject(intent_class, env->GetMethodID(intent_class, "<init>", "()V"));
+    jclass context_class = env->GetObjectClass(context_);
+    jobject package = env->CallObjectMethod(context_, env->GetMethodID(context_class, "getPackageName", "()Ljava/lang/String;"));
+    env->CallObjectMethod(intent,
+                          env->GetMethodID(intent_class, "setClassName",
+                                           "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;"),
+                          package, env->NewStringUTF(kReceiver));
+    env->CallObjectMethod(intent, env->GetMethodID(intent_class, "putExtra", "(Ljava/lang/String;I)Landroid/content/Intent;"),
+                          env->NewStringUTF(kRequestExtra), id);
+    jclass pending_class = env->FindClass("android/app/PendingIntent");
+    jmethodID get_broadcast = env->GetStaticMethodID(
+        pending_class, "getBroadcast", "(Landroid/content/Context;ILandroid/content/Intent;I)Landroid/app/PendingIntent;");
+    const jint flags = kFlagUpdateCurrent | (api_level_ >= 31 ? kFlagMutable : 0);
+    jobject pending = env->CallStaticObjectMethod(pending_class, get_broadcast, context_, id, intent, flags);
+    if (env->ExceptionCheck() || pending == nullptr) return nullptr;
+    return env->CallObjectMethod(pending, env->GetMethodID(pending_class, "getIntentSender", "()Landroid/content/IntentSender;"));
+}
+
+jobject Api::package_installer(JNIEnv* env) noexcept {
+    jclass context_class = env->GetObjectClass(context_);
+    jobject manager = env->CallObjectMethod(
+        context_, env->GetMethodID(context_class, "getPackageManager", "()Landroid/content/pm/PackageManager;"));
+    if (env->ExceptionCheck() || manager == nullptr) return nullptr;
+    jclass manager_class = env->GetObjectClass(manager);
+    return env->CallObjectMethod(
+        manager, env->GetMethodID(manager_class, "getPackageInstaller", "()Landroid/content/pm/PackageInstaller;"));
+}
+
+bool Api::can_install(JNIEnv* env) noexcept {
+    if (env->PushLocalFrame(kFrame) != JNI_OK) return false;
+    std::string why;
+    jclass context_class = env->GetObjectClass(context_);
+    jobject manager = env->CallObjectMethod(
+        context_, env->GetMethodID(context_class, "getPackageManager", "()Landroid/content/pm/PackageManager;"));
+    bool can = false;
+    if (!thrown(env, why) && manager != nullptr) {
+        jmethodID m = env->GetMethodID(env->GetObjectClass(manager), "canRequestPackageInstalls", "()Z");
+        can = m != nullptr && env->CallBooleanMethod(manager, m) == JNI_TRUE;
+        if (thrown(env, why)) can = false;
+    }
+    env->PopLocalFrame(nullptr);
+    return can;
+}
+
+std::optional<std::int64_t> Api::version_code(JNIEnv* env, const std::string& package) noexcept {
+    if (env->PushLocalFrame(kFrame) != JNI_OK) return std::nullopt;
+    std::string why;
+    std::optional<std::int64_t> code;
+    jclass context_class = env->GetObjectClass(context_);
+    jobject manager = env->CallObjectMethod(
+        context_, env->GetMethodID(context_class, "getPackageManager", "()Landroid/content/pm/PackageManager;"));
+    if (!thrown(env, why) && manager != nullptr) {
+        jmethodID get_info = env->GetMethodID(env->GetObjectClass(manager), "getPackageInfo",
+                                              "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;");
+        jobject info = env->CallObjectMethod(manager, get_info, env->NewStringUTF(package.c_str()), 0);
+        if (!thrown(env, why) && info != nullptr) {
+            jmethodID long_code = env->GetMethodID(env->GetObjectClass(info), "getLongVersionCode", "()J");
+            const jlong value = env->CallLongMethod(info, long_code);
+            if (!thrown(env, why)) code = value;
+        }
+    }
+    env->PopLocalFrame(nullptr);
+    return code;
+}
+
+std::optional<Api::Outcome> Api::install(JNIEnv* env, const std::string& apk, std::string& why) noexcept {
+    const int fd = ::open(apk.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        why = apk + ": " + std::strerror(errno);
+        return std::nullopt;
+    }
+    struct stat st{};
+    if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) {
+        ::close(fd);
+        why = apk + ": not a file";
+        return std::nullopt;
+    }
+    if (env->PushLocalFrame(kFrame) != JNI_OK) {
+        ::close(fd);
+        why = "out of memory";
+        return std::nullopt;
+    }
+    int id = 0;
+    bool committed = false;
+    jobject installer = package_installer(env);
+    jobject session = nullptr;
+    jclass session_class = nullptr;
+    if (!thrown(env, why) && installer != nullptr) {
+        jclass installer_class = env->GetObjectClass(installer);
+        jclass params_class = env->FindClass("android/content/pm/PackageInstaller$SessionParams");
+        jobject params = params_class != nullptr
+                             ? env->NewObject(params_class, env->GetMethodID(params_class, "<init>", "(I)V"), 1)  // MODE_FULL_INSTALL
+                             : nullptr;
+        const jint session_id =
+            params != nullptr
+                ? env->CallIntMethod(installer,
+                                     env->GetMethodID(installer_class, "createSession",
+                                                      "(Landroid/content/pm/PackageInstaller$SessionParams;)I"),
+                                     params)
+                : 0;
+        if (!thrown(env, why) && params != nullptr)
+            session = env->CallObjectMethod(
+                installer, env->GetMethodID(installer_class, "openSession", "(I)Landroid/content/pm/PackageInstaller$Session;"),
+                session_id);
+    }
+    if (!thrown(env, why) && session != nullptr) {
+        session_class = env->GetObjectClass(session);
+        // The APK's bytes, straight into the session: no file is shared.
+        jobject out = env->CallObjectMethod(
+            session, env->GetMethodID(session_class, "openWrite", "(Ljava/lang/String;JJ)Ljava/io/OutputStream;"),
+            env->NewStringUTF("base.apk"), jlong{0}, static_cast<jlong>(st.st_size));
+        bool written = !thrown(env, why) && out != nullptr;
+        if (written) {
+            jclass out_class = env->GetObjectClass(out);
+            jmethodID write = env->GetMethodID(out_class, "write", "([BII)V");
+            constexpr jsize kChunk = 64 * 1024;
+            jbyteArray chunk = env->NewByteArray(kChunk);
+            std::array<char, kChunk> buffer{};
+            while (written && chunk != nullptr) {
+                const ssize_t n = ::read(fd, buffer.data(), buffer.size());
+                if (n < 0 && errno == EINTR) continue;
+                if (n < 0) {
+                    why = apk + ": " + std::strerror(errno);
+                    written = false;
+                }
+                if (n <= 0) break;
+                env->SetByteArrayRegion(chunk, 0, static_cast<jsize>(n), reinterpret_cast<const jbyte*>(buffer.data()));
+                env->CallVoidMethod(out, write, chunk, 0, static_cast<jint>(n));
+                if (thrown(env, why)) written = false;
+            }
+            if (chunk == nullptr) written = false;
+            if (written) {
+                env->CallVoidMethod(session, env->GetMethodID(session_class, "fsync", "(Ljava/io/OutputStream;)V"), out);
+                if (thrown(env, why)) written = false;
+            }
+            env->CallVoidMethod(out, env->GetMethodID(out_class, "close", "()V"));
+            if (thrown(env, why)) written = false;
+        }
+        if (written) {
+            {
+                const std::lock_guard lock(results_mutex_);
+                id = next_request_++;
+            }
+            jobject sender = result_sender(env, id);
+            if (!thrown(env, why) && sender != nullptr) {
+                env->CallVoidMethod(session,
+                                    env->GetMethodID(session_class, "commit", "(Landroid/content/IntentSender;)V"), sender);
+                committed = !thrown(env, why);
+            }
+        }
+        if (!committed) {
+            env->CallVoidMethod(session, env->GetMethodID(session_class, "abandon", "()V"));
+            thrown(env, why);
+        } else {
+            env->CallVoidMethod(session, env->GetMethodID(session_class, "close", "()V"));
+            thrown(env, why);
+        }
+    }
+    env->PopLocalFrame(nullptr);
+    ::close(fd);
+    if (!committed) {
+        if (why.empty()) why = "Android's package installer could not be reached";
+        return std::nullopt;
+    }
+    say("installing", apk);
+    auto outcome = wait_for(id);
+    if (!outcome) why = "no answer from Android in 10 minutes";
+    return outcome;
+}
+
+std::optional<Api::Outcome> Api::uninstall(JNIEnv* env, const std::string& package, std::string& why) noexcept {
+    if (env->PushLocalFrame(kFrame) != JNI_OK) {
+        why = "out of memory";
+        return std::nullopt;
+    }
+    int id = 0;
+    bool asked = false;
+    jobject installer = package_installer(env);
+    if (!thrown(env, why) && installer != nullptr) {
+        {
+            const std::lock_guard lock(results_mutex_);
+            id = next_request_++;
+        }
+        jobject sender = result_sender(env, id);
+        if (!thrown(env, why) && sender != nullptr) {
+            env->CallVoidMethod(installer,
+                                env->GetMethodID(env->GetObjectClass(installer), "uninstall",
+                                                 "(Ljava/lang/String;Landroid/content/IntentSender;)V"),
+                                env->NewStringUTF(package.c_str()), sender);
+            asked = !thrown(env, why);
+        }
+    }
+    env->PopLocalFrame(nullptr);
+    if (!asked) {
+        if (why.empty()) why = "Android's package installer could not be reached";
+        return std::nullopt;
+    }
+    say("uninstalling", package);
+    auto outcome = wait_for(id);
+    if (!outcome) why = "no answer from Android in 10 minutes";
+    return outcome;
 }
 
 }  // namespace sq_android

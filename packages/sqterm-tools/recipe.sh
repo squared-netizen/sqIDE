@@ -5,19 +5,21 @@
 #
 #   bin/sqterm-api      one request as given, its response (for testing)
 #   bin/sqterm-launch   start an installed app: a link to sqterm-api
+#   bin/sqterm-install  install an APK (Android asks): a link
+#   bin/sqterm-uninstall  uninstall an app (Android asks): a link
 #
 # Built from this repository (no source to download), as pkg is: by the
 # SDK's toolchain (squared/build/toolchain.sh's wrappers), against the
 # sysroot and runtimes packages; yyjson (squared's copy) for the JSON.
 
-version=1
+version=2
 license="sqterm's own"
 file=
 top=
 depends="sysroot runtimes"
 inputs="sq_app/cli/sqterm_cli.cpp squared/third_party/yyjson/yyjson.c squared/third_party/yyjson/yyjson.h
         squared/build/toolchain.sh"
-keep="bin/sqterm-api bin/sqterm-launch"
+keep="bin/sqterm-api bin/sqterm-launch bin/sqterm-install bin/sqterm-uninstall"
 
 recipe_build() {
   local here=$PWD out=$dest$SQ_PREFIX/bin cxx cc ldflags=
@@ -45,5 +47,6 @@ recipe_build() {
   mkdir -p "$out"
   "$cxx" -std=c++23 -stdlib=libc++ -O2 -Wall -Wextra -I"$yy" "$ROOT/sq_app/cli/sqterm_cli.cpp" yyjson.o \
     $ldflags -o "$out/sqterm-api"
-  ln -sf sqterm-api "$out/sqterm-launch"
+  local link
+  for link in sqterm-launch sqterm-install sqterm-uninstall; do ln -sf sqterm-api "$out/$link"; done
 }
