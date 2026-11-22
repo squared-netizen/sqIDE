@@ -184,17 +184,23 @@ std::string Api::handle(std::string_view request, JNIEnv* env) noexcept {
     auto parsed = sq::data::parse_json(request);
     if (!parsed) return fail("bad_request", "not JSON");
     const JsonValue& r = parsed.value;
+    // sq.data keeps a number that fits as unsigned when it is not negative:
+    // 1 is either kind.
     const JsonValue* sq = r.find("sq");
-    if (sq == nullptr || sq->signed_integer_if() == nullptr || *sq->signed_integer_if() != 1)
-        return fail("bad_request", "not an SDK request (sq: 1)");
+    const bool one = sq != nullptr && ((sq->unsigned_integer_if() != nullptr && *sq->unsigned_integer_if() == 1) ||
+                                       (sq->signed_integer_if() != nullptr && *sq->signed_integer_if() == 1));
+    if (!one) return fail("bad_request", "not an SDK request (sq: 1)");
     const JsonValue* command = r.find("command");
     const std::string* name = command != nullptr ? command->string_if() : nullptr;
     if (name == nullptr) return fail("bad_request", "no command");
     const JsonValue* args = r.find("args");
 
     if (*name == "status") {
-        return ok(JsonValue(JsonValue::Object{{"commands", JsonValue(JsonValue::Array{JsonValue("status"), JsonValue("launch")})},
-                                              {"api_level", JsonValue(std::int64_t{api_level_})}}));
+        JsonValue::Object result{{"commands", JsonValue(JsonValue::Array{JsonValue("status"), JsonValue("launch")})},
+                                 {"api_level", JsonValue(std::int64_t{api_level_})}};
+        // The installed APK: `apkpack verify` on it says which key signed it.
+        if (const std::string apk = apk_path(env); !apk.empty()) result.emplace("apk", JsonValue(apk));
+        return ok(JsonValue(std::move(result)));
     }
     if (*name == "launch") {
         const JsonValue* package = args != nullptr ? args->find("package") : nullptr;
@@ -205,6 +211,22 @@ std::string Api::handle(std::string_view request, JNIEnv* env) noexcept {
         return ok(JsonValue(JsonValue::Object{{"package", JsonValue(*p)}}));
     }
     return fail("unknown_command", *name + ": sqterm's API answers status and launch");
+}
+
+std::string Api::apk_path(JNIEnv* env) noexcept {
+    if (env->PushLocalFrame(kFrame) != JNI_OK) return {};
+    std::string path;
+    jclass context_class = env->GetObjectClass(context_);
+    jmethodID code_path = env->GetMethodID(context_class, "getPackageCodePath", "()Ljava/lang/String;");
+    auto s = code_path != nullptr ? static_cast<jstring>(env->CallObjectMethod(context_, code_path)) : nullptr;
+    if (take_exception(env).empty() && s != nullptr) {
+        if (const char* chars = env->GetStringUTFChars(s, nullptr); chars != nullptr) {
+            path = chars;
+            env->ReleaseStringUTFChars(s, chars);
+        }
+    }
+    env->PopLocalFrame(nullptr);
+    return path;
 }
 
 std::string Api::launch(JNIEnv* env, const std::string& package) noexcept {
