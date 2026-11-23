@@ -203,3 +203,16 @@ jobs:
           gh release create "$tag" "${files[@]}" --prerelease --target "$GITHUB_SHA" \
             --title "sqterm $(date -u '+%Y-%m-%d %H:%M') UTC $tag (arm64-v8a, test)" \
             --notes "Test builds of $GITHUB_SHA for arm64-v8a, API 28 and later. basic: zsh and pkg (pkg installs the rest). all: every package bundled. Signed with the squared key, certificate SHA-256 $want (SIGNING.md): apkpack verify prints it."
+
+      # Only the current test release and the one before it are kept: the
+      # older test-<commit> prereleases go, with their tags.
+      - name: Prune old test releases
+        if: github.event_name == 'workflow_dispatch' && inputs.release
+        run: |
+          set -euo pipefail
+          gh release list -R "$GITHUB_REPOSITORY" --limit 200 --json tagName,publishedAt \
+            --jq '[.[] | select(.tagName | startswith("test-"))] | sort_by(.publishedAt) | reverse | .[2:] | .[].tagName' |
+          while read -r old; do
+            echo "deleting $old"
+            gh release delete "$old" -R "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          done

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # prune_test_releases.sh: delete sqterm's old test releases (test-<commit>),
-# keeping the newest.
+# keeping the newest two (the current and the last; apk.yml prunes so too).
 #
 #   prune_test_releases.sh            list what would go (nothing is changed)
 #   prune_test_releases.sh --delete   delete those releases and their tags
-#   prune_test_releases.sh --keep 3   keep the newest 3 (default 1)
+#   prune_test_releases.sh --keep 3   keep the newest 3 (default 2: the current and the last)
 #
 # Only bash and curl: runs in sqterm as it comes. The token is read from
 # ~/.git-credentials (the https://USER:TOKEN@github.com line git uses), or
@@ -16,7 +16,7 @@ set -euo pipefail
 
 REPO=${SQ_RELEASES_REPO:-squared-netizen/sqterm}
 API=https://api.github.com/repos/$REPO
-KEEP=1
+KEEP=2
 DELETE=0
 
 fail() { printf 'prune_test_releases: %s\n' "$*" >&2; exit 1; }

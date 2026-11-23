@@ -82,6 +82,10 @@ squared-pg/       sqpg 0.1.0-alpha.2 (MIT): the SDK's workspace generator
                   packages at the commits squared-pg pins (`extra` files);
                   in share/squared-pg, linked from bin (not in the APK: pkg
                   install squared-pg)
+square/           square 0.3.0 (MIT): the SDK's workspace manager (square
+                  info, where, owner, verify, resources, show, call); C++23
+                  modules with sqcart vendored, built as sqedit is (not in
+                  the APK: pkg install square)
 ```
 
 ## As cartridges (from 2026-11-19)
