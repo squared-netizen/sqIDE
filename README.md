@@ -29,6 +29,13 @@ Where it stands (Sprint 12 of the squared plan):
   to 300% in steps of 5, and the grid follows; the size is kept for the next
   launch. (Every squared app zooms its whole UI with a pinch; the terminal
   takes the pinch for its font instead.)
+- The soft keyboard (2026-11-23): a two-finger tap brings it up or puts it
+  away; touching the terminal (a scroll, a selection) never does. It comes
+  back when sqterm comes back to the front if it was up, and put away with
+  Back it stays away.
+- The drawer, as Termux's: a swipe right from the left edge brings it in,
+  with a Keyboard button; a swipe left or a tap beside it puts it away.
+  Settings will go in it.
 - 12.5a, zsh: sqterm's own prefix (`files/usr`, Termux's way), filled from
   packages the APK carries. `make packages` builds ncurses 6.6 and zsh 5.9.2
   for it on the phone, with the NDK, for API 22 (`packages/`); the app
