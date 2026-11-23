@@ -194,6 +194,9 @@ public:
     bool key_text(std::string_view text, sq::app::KeyModifiers modifiers) override;
     [[nodiscard]] bool focusable() const noexcept override { return true; }
     [[nodiscard]] bool wants_text_input() const noexcept override { return true; }
+    /// A touch scrolls or selects: the soft keyboard comes and goes with a
+    /// two-finger tap (pinch), not with focus.
+    [[nodiscard]] bool keyboard_on_focus() const noexcept override { return false; }
 
 protected:
     void input_event(sq::gui::InputEvent& event) override;
@@ -228,6 +231,13 @@ private:
     void follow_finger(double delta_seconds) noexcept;
     void paint_selection(sq::gui::Painter& painter, float x0, float y0) const;
 
+    // The side pane, as Termux's drawer: swiped in from the left edge.
+    [[nodiscard]] sq::gui::Rectangle drawer() const noexcept;
+    [[nodiscard]] sq::gui::Rectangle drawer_keyboard() const noexcept;
+    void paint_drawer(sq::gui::Painter& painter, float x0, float y0) const;
+    /// A touch the drawer takes (open, or swiped in now): true when it did.
+    bool drawer_pointer(const sq::gui::PointerEvent& event) noexcept;
+
     sq::Stage& stage_;
     Glyphs& glyphs_;
     std::optional<sq::term::ScreenView> view_;
@@ -258,6 +268,8 @@ private:
     bool bar_shown_ = false;   ///< the bar is shown
     bool paste_only_ = false;  ///< with Paste alone
     int pinch_start_ = 100;    ///< the font's size, in percent, as a pinch began
+    std::chrono::steady_clock::time_point pinch_began_{};  ///< for a two-finger tap
+    bool pinch_moved_ = false;  ///< the fingers spread or closed: a pinch, not a tap
     float scale_ = 0.0F;       ///< pixels to a logical unit, as the glyphs were made
     float cell_w_ = 0.0F;      ///< a cell, in logical units
     float cell_h_ = 0.0F;
@@ -267,6 +279,12 @@ private:
     float drag_rest_ = 0.0F;     ///< part of a line dragged, not yet scrolled
     std::int64_t scrolled_ = 0;  ///< lines back, as asked
     bool dragging_ = false;
+    bool drawer_open_ = false;
+    bool edge_press_ = false;     ///< down by the left edge: may swipe the drawer in
+    bool drawer_press_ = false;   ///< down while it is open
+    bool drawer_button_ = false;  ///< its Keyboard button held
+    float drawer_x_ = 0.0F;       ///< where that press went down
+    float drawer_y_ = 0.0F;
 };
 
 /// The one screen: the terminal, filling it.

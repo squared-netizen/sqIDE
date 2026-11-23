@@ -341,6 +341,38 @@ int console_cell(int dpi) {
 }
 #endif
 
+/// Whether the soft keyboard is on screen: WindowInsets.isVisible(ime()),
+/// API 30 and later; std::nullopt below, or when it cannot be asked. Every
+/// local reference made is deleted.
+std::optional<bool> ime_visible(JNIEnv* env, jobject activity, int api_level) {
+    constexpr int kImeVisibilityApi = 30;
+    if (env == nullptr || activity == nullptr || api_level < kImeVisibilityApi) return std::nullopt;
+    jobject window = call_object(env, activity, "getWindow", "()Landroid/view/Window;");
+    jobject decor = call_object(env, window, "getDecorView", "()Landroid/view/View;");
+    jobject insets = call_object(env, decor, "getRootWindowInsets", "()Landroid/view/WindowInsets;");
+    std::optional<bool> visible;
+    jclass types = env->FindClass("android/view/WindowInsets$Type");
+    jmethodID ime = types != nullptr ? env->GetStaticMethodID(types, "ime", "()I") : nullptr;
+    if (insets != nullptr && ime != nullptr) {
+        const jint which = env->CallStaticIntMethod(types, ime);
+        jclass insets_class = env->GetObjectClass(insets);
+        jmethodID is_visible = env->GetMethodID(insets_class, "isVisible", "(I)Z");
+        if (is_visible != nullptr && env->ExceptionCheck() == JNI_FALSE) {
+            visible = env->CallBooleanMethod(insets, is_visible, which) == JNI_TRUE;
+        }
+        env->DeleteLocalRef(insets_class);
+    }
+    if (env->ExceptionCheck() != JNI_FALSE) {
+        env->ExceptionClear();
+        visible.reset();
+    }
+    if (types != nullptr) env->DeleteLocalRef(types);
+    if (insets != nullptr) env->DeleteLocalRef(insets);
+    if (decor != nullptr) env->DeleteLocalRef(decor);
+    if (window != nullptr) env->DeleteLocalRef(window);
+    return visible;
+}
+
 /// Read the insets of the activity's window, in pixels, from API 23. Zero when
 /// unavailable; below kInsetsApi, measure_visible_frame() answers instead.
 ///
@@ -1540,6 +1572,8 @@ struct Platform {
     /// An unchanged answer costs the JNI calls and nothing else.
     void sync_safe_area() {
         frames_since_measure = 0;
+        // The keyboard as Android has it: put away with Back is no longer up.
+        if (const auto ime = ime_visible(jni(), activity, api_level)) text_input.seen(*ime);
         const sq::app::SafeArea measured = api_level >= kInsetsApi
             ? measure_safe_area(jni(), activity, api_level)
             : measure_visible_frame(jni(), activity);
@@ -1746,7 +1780,7 @@ struct Platform {
         // The keyboard a text widget asked for, once every finger is up.
         text_input.frame(fingers > 0);
         // The keyboard shown or hidden: it slides, so measure for a while.
-        bool keyboard = text_input.active();
+        bool keyboard = text_input.active() && text_input.keyboard_shown();
 #ifdef SQUARED_CONSOLE
         keyboard = keyboard || (console_focused && console.shown());
 #endif
@@ -1842,6 +1876,8 @@ void on_command(android_app* app, int32_t command) {
             platform.has_focus = true;
             platform.bars_asked = false;  // asked again at the next frame
             if (platform.created) platform.app.resume();
+            // The keyboard Android put away when the app left, back if it was up.
+            platform.text_input.resumed();
             // The clock stopped meaning anything while backgrounded.
             platform.last_frame = Clock::now();
             Event event;

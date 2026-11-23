@@ -138,23 +138,41 @@ class TextInput final : public sq::app::TextInputService {
 public:
     explicit TextInput(AndroidText& text) noexcept : text_(text) {}
 
-    void start(const sq::app::TextInputRequest&) override {
+    /// A widget takes text: keys and the keyboard's text go to it. The soft
+    /// keyboard comes up only when the request says so (a text field); a
+    /// widget that asks for it itself (sqterm's terminal: a two-finger tap)
+    /// starts without it.
+    void start(const sq::app::TextInputRequest& request) override {
         active_ = true;
-        show_due_ = true;
+        if (request.keyboard) show_keyboard(true);
     }
     void update_area(const sq::app::TextInputArea&) override {}
     void stop() override {
         active_ = false;
+        wanted_ = false;
         show_due_ = false;
         again_frames_ = 0;
         text_.hide_keyboard();
     }
     [[nodiscard]] bool active() const noexcept override { return active_; }
 
+    /// The keyboard up or away, text input staying on.
+    void show_keyboard(bool shown) override {
+        wanted_ = shown;
+        quiet_frames_ = shown ? kSettleFrames : 0;
+        show_due_ = shown;
+        if (!shown) {
+            again_frames_ = 0;
+            text_.hide_keyboard();
+        }
+    }
+    [[nodiscard]] bool keyboard_shown() const noexcept override { return wanted_; }
+
     /// Each frame, with whether a finger is on the screen: the keyboard
-    /// start() asked for, once none is.
+    /// asked for, once none is.
     void frame(bool touching) noexcept {
-        if (again_frames_ > 0 && --again_frames_ == 0 && active_) show_due_ = true;
+        if (quiet_frames_ > 0) --quiet_frames_;
+        if (again_frames_ > 0 && --again_frames_ == 0 && active_ && wanted_) show_due_ = true;
         if (show_due_ && !touching) {
             show_due_ = false;
             text_.show_keyboard();
@@ -164,14 +182,34 @@ public:
     /// Enter was typed while a widget wants text: the keyboard asked for
     /// again in about 100 ms, in case it put itself away.
     void entered() noexcept {
-        if (active_) again_frames_ = 6;
+        if (active_ && wanted_) again_frames_ = 6;
+    }
+
+    /// Back in front: Android put the keyboard away when the app went to
+    /// the background; it comes back if it was up.
+    void resumed() noexcept {
+        if (active_ && wanted_) {
+            show_due_ = true;
+            quiet_frames_ = kSettleFrames;
+        }
+    }
+
+    /// What Android says of the keyboard (its window insets, API 30 on):
+    /// put away by the person (Back, its own button) is no longer wanted.
+    /// Not believed while it is still sliding in after being asked for.
+    void seen(bool visible) noexcept {
+        if (!visible && wanted_ && !show_due_ && quiet_frames_ == 0) wanted_ = false;
     }
 
 private:
+    static constexpr std::uint8_t kSettleFrames = 60;  // about a second
+
     AndroidText& text_;
     bool active_{false};
+    bool wanted_{false};   ///< the keyboard is meant to be up
     bool show_due_{false};
     std::uint8_t again_frames_{0};
+    std::uint8_t quiet_frames_{0};
 };
 
 /// sq::app::ClipboardService on Android: the system clipboard's text, through

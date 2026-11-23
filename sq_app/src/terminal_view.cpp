@@ -88,6 +88,13 @@ constexpr float handle_reach_units = 40.0F;
 constexpr float button_width_units = 110.0F;
 constexpr float button_height_units = 52.0F;
 constexpr float bar_gap_units = 10.0F;
+/// The drawer: a swipe from this near the left edge brings it in (wider than
+/// the strip gesture navigation keeps for Back), this far to count, and how
+/// wide it is at most.
+constexpr float drawer_edge_units = 48.0F;
+constexpr float drawer_swipe_units = 40.0F;
+constexpr float drawer_width_units = 280.0F;
+constexpr float drawer_margin_units = 16.0F;
 /// A handle at the edge scrolls a line this often.
 constexpr double edge_scroll_seconds = 0.06;
 /// The most a paste sends in one telegram (a quarter of the data ring is
@@ -102,6 +109,10 @@ constexpr sq::graphics::Color bar_color{
     .red = 0.20F, .green = 0.20F, .blue = 0.22F, .alpha = 0.96F};
 constexpr sq::graphics::Color bar_pressed_color{
     .red = 0.30F, .green = 0.30F, .blue = 0.34F, .alpha = 1.0F};
+constexpr sq::graphics::Color drawer_shade_color{
+    .red = 0.0F, .green = 0.0F, .blue = 0.0F, .alpha = 0.45F};
+constexpr sq::graphics::Color drawer_button_color{
+    .red = 0.26F, .green = 0.26F, .blue = 0.29F, .alpha = 1.0F};
 constexpr sq::graphics::Color bar_text_color{
     .red = 0.95F, .green = 0.95F, .blue = 0.95F, .alpha = 1.0F};
 
@@ -405,8 +416,104 @@ void TerminalView::paint(sq::gui::Painter& painter, const sq::gui::Skin& /*skin*
         }
     }
 
-    // 4. The handles and the bar, over everything.
+    // 4. The handles and the bar, over everything; the drawer over those.
     paint_selection(painter, x0, y0);
+    paint_drawer(painter, x0, y0);
+}
+
+sq::gui::Rectangle TerminalView::drawer() const noexcept {
+    return {0.0F, 0.0F, std::min(width() * 0.75F, drawer_width_units), height()};
+}
+
+sq::gui::Rectangle TerminalView::drawer_keyboard() const noexcept {
+    const sq::gui::Rectangle pane = drawer();
+    return {drawer_margin_units, drawer_margin_units * 4.0F, pane.width - (drawer_margin_units * 2.0F),
+            button_height_units};
+}
+
+void TerminalView::paint_drawer(sq::gui::Painter& painter, float x0, float y0) const {
+    if (!drawer_open_) {
+        return;
+    }
+    painter.fill_rectangle({x0, y0, width(), height()}, drawer_shade_color);
+    const sq::gui::Rectangle pane = drawer();
+    painter.fill_rectangle({x0 + pane.x, y0 + pane.y, pane.width, pane.height}, bar_color);
+    painter.draw_text("sqterm", x0 + drawer_margin_units, y0 + drawer_margin_units, bar_text_color);
+    const sq::gui::Rectangle button = drawer_keyboard();
+    const sq::gui::Rectangle at{x0 + button.x, y0 + button.y, button.width, button.height};
+    painter.fill_rectangle(at, drawer_button_ ? bar_pressed_color : drawer_button_color);
+    const std::string_view label = stage_.keyboard_shown() ? "Hide keyboard" : "Keyboard";
+    const sq::gui::Size size = painter.measure_text(label);
+    painter.draw_text(label, at.x + ((at.width - size.width) * 0.5F),
+                      at.y + ((at.height - size.height) * 0.5F), bar_text_color);
+}
+
+bool TerminalView::drawer_pointer(const sq::gui::PointerEvent& event) noexcept {
+    using sq::gui::PointerAction;
+    if (drawer_open_) {
+        switch (event.action) {
+            case PointerAction::down:
+                drawer_press_ = true;
+                drawer_x_ = event.x;
+                drawer_y_ = event.y;
+                drawer_button_ = inside(drawer_keyboard(), event.x, event.y);
+                break;
+            case PointerAction::move:
+                if (drawer_press_ && event.x - drawer_x_ < -drawer_swipe_units) {
+                    drawer_open_ = false;  // swiped back out
+                    drawer_press_ = false;
+                    drawer_button_ = false;
+                } else if (drawer_button_ && !inside(drawer_keyboard(), event.x, event.y)) {
+                    drawer_button_ = false;
+                }
+                break;
+            case PointerAction::up:
+            case PointerAction::cancel:
+                if (drawer_press_ && event.action == PointerAction::up) {
+                    if (drawer_button_ && inside(drawer_keyboard(), event.x, event.y)) {
+                        stage_.toggle_keyboard();
+                        drawer_open_ = false;
+                    } else if (!inside(drawer(), event.x, event.y)) {
+                        drawer_open_ = false;  // a tap beside it puts it away
+                    }
+                }
+                drawer_press_ = false;
+                drawer_button_ = false;
+                break;
+        }
+        return true;
+    }
+    switch (event.action) {
+        case PointerAction::down:
+            edge_press_ = event.x < drawer_edge_units && !selecting_ && !bar_shown_;
+            drawer_x_ = event.x;
+            drawer_y_ = event.y;
+            return false;
+        case PointerAction::move: {
+            if (!edge_press_) {
+                return false;
+            }
+            const float dx = event.x - drawer_x_;
+            const float dy = event.y - drawer_y_;
+            if (dx > drawer_swipe_units && std::abs(dy) < dx) {
+                drawer_open_ = true;  // swiped in: the rest of this touch is the drawer's
+                edge_press_ = false;
+                pressing_ = false;
+                dragging_ = false;
+                moved_ = true;
+                return true;
+            }
+            if (std::abs(dy) > drawer_swipe_units || dx < -slop_units) {
+                edge_press_ = false;
+            }
+            return false;
+        }
+        case PointerAction::up:
+        case PointerAction::cancel:
+            edge_press_ = false;
+            return false;
+    }
+    return false;
 }
 
 void TerminalView::paint_selection(sq::gui::Painter& painter, float x0, float y0) const {
@@ -446,6 +553,9 @@ void TerminalView::paint_selection(sq::gui::Painter& painter, float x0, float y0
 
 bool TerminalView::pointer_event(const sq::gui::PointerEvent& event) {
     using sq::gui::PointerAction;
+    if (drawer_pointer(event)) {
+        return true;
+    }
     switch (event.action) {
         case PointerAction::down: {
             press_x_ = event.x;
@@ -482,7 +592,7 @@ bool TerminalView::pointer_event(const sq::gui::PointerEvent& event) {
                 }
             }
             pressing_ = true;
-            return true;  // the Ui focuses it, which raises the keyboard
+            return true;  // the Ui focuses it; the keyboard waits for a two-finger tap
         }
         case PointerAction::move: {
             if (pressed_ != Button::none) {
@@ -565,6 +675,18 @@ bool TerminalView::pinch(const sq::gui::PinchEvent& event) {
     }
     if (event.phase == PinchPhase::begin) {
         pinch_start_ = font_percent;
+        pinch_began_ = std::chrono::steady_clock::now();
+        pinch_moved_ = false;
+        return true;
+    }
+    if (event.phase == PinchPhase::change) {
+        pinch_moved_ = true;  // past the Stage's slop: a pinch
+    }
+    // Two fingers down and up again, not spread: the soft keyboard up or away.
+    constexpr auto tap_time = std::chrono::milliseconds(400);
+    if (event.phase == PinchPhase::end && !pinch_moved_ &&
+        std::chrono::steady_clock::now() - pinch_began_ < tap_time) {
+        stage_.toggle_keyboard();
         return true;
     }
     const int percent = to_font_step(static_cast<float>(pinch_start_) * event.scale);
