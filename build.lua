@@ -25,6 +25,6 @@ app = {
 local built = include("sq/build/template.lua")
 
 -- Run when asked, not by every build (a first one takes several minutes).
-verb("packages", {desc = "the packages (packages/build.sh)", cmd = {"bash", "packages/build.sh"}})
+action{name = "packages", desc = "the packages (packages/build.sh)", cmd = {"bash", "packages/build.sh"}}
 
 return built
