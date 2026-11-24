@@ -29,7 +29,7 @@ constexpr int kFlagMutable = 0x02000000;        // PendingIntent.FLAG_MUTABLE (A
 constexpr int kStatusPendingUserAction = -1;    // PackageInstaller.STATUS_PENDING_USER_ACTION
 constexpr int kStatusSuccess = 0;               // PackageInstaller.STATUS_SUCCESS
 constexpr const char* kReceiver = "dev.squared.ResultReceiver";
-constexpr const char* kRequestExtra = "dev.squared.sqterm.REQUEST";  // which request a result answers
+constexpr const char* kRequestExtra = "dev.squared.sqide.REQUEST";  // which request a result answers
 constexpr auto kAnswerTimeout = std::chrono::minutes(10);  // a person is deciding
 
 /// PackageInstaller.STATUS_* by name, for the error's code.

@@ -25,7 +25,7 @@ ifeq ($(shell command -v $(firstword $(SQEDIT)) 2>/dev/null),)
 endif
 
 SQ_PROJECT           := sqterm
-SQ_PACKAGE           := dev.squared.sqterm
+SQ_PACKAGE           := dev.squared.sqide
 SQ_GENERATOR         := squared-pg
 SQ_GENERATOR_VERSION := 0.1.0-alpha.1
 SQ_TEMPLATE          := template.android.cpp@0.1.0
