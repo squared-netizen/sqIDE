@@ -9,6 +9,15 @@
 // the prefix (an absolute name, a ".."). SQ-INF/, the package's manifest,
 // goes to a directory of the caller's choosing.
 //
+// Packages are built for sqterm's folder (built_prefix), and some keep it:
+// zsh's /etc/zshrc, git's exec path, tic's terminfo, #! lines. Unpacked into
+// another app's folder (sqIDE's), each file is rewritten to that folder as it
+// lands (relocate): text whole, a program in place, each C string holding
+// the folder ended early with NULs, so nothing in the program moves. That
+// needs the new folder no longer than sqterm's (sqIDE's is one shorter), and
+// strings not sharing bytes, which lld does only with -O2 (packages link
+// without it).
+//
 // Memory, while it unpacks: zstd's decoder (about 100 KB) and its window
 // (packages/build.sh compresses with a 1 MB window), 64 KB in and 128 KB out,
 // freed when it is done. Nothing after.
@@ -22,7 +31,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -57,6 +68,127 @@ constexpr std::size_t out_bytes = std::size_t{128} * 1024;
     out += ": ";
     out += strerror(errno);
     return out;
+}
+
+/// `text` with every `from` replaced by `to`.
+[[nodiscard]] std::string replaced(std::string_view text, std::string_view from,
+                                   std::string_view to) {
+    std::string out;
+    out.reserve(text.size());
+    for (std::size_t at = 0;;) {
+        const std::size_t hit = text.find(from, at);
+        if (hit == std::string_view::npos) {
+            out += text.substr(at);
+            return out;
+        }
+        out += text.substr(at, hit - at);
+        out += to;
+        at = hit + from.size();
+    }
+}
+
+/// The file's canonical path, or nothing (not there, or not ours to read).
+[[nodiscard]] std::string real(const std::string& path) {
+    char* resolved = ::realpath(path.c_str(), nullptr);
+    if (resolved == nullptr) {
+        return {};
+    }
+    std::string out(resolved);
+    ::free(resolved);
+    return out;
+}
+
+[[nodiscard]] std::string relocate_target(std::string_view prefix) {
+    std::string p(prefix);
+    while (p.size() > 1 && p.back() == '/') {
+        p.pop_back();
+    }
+    if (p == built_prefix) {
+        return {};
+    }
+    const std::string here = real(p);
+    if (!here.empty() && here == real(built_prefix)) {
+        return {};  // sqterm's folder by another name
+    }
+    // /data/user/0/<app> is /data/data/<app> for the phone's owner: shorter.
+    constexpr std::string_view user0 = "/data/user/0/";
+    if (p.starts_with(user0)) {
+        const std::string data = "/data/data/" + p.substr(user0.size());
+        if (!here.empty() && real(data) == here) {
+            p = data;
+        }
+    }
+    return p;
+}
+
+[[nodiscard]] std::string relocate(const std::string& path, std::string_view to) {
+    const std::string_view from = built_prefix;
+    const int fd = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
+    if (fd < 0) {
+        return errno_text("cannot open", path);
+    }
+    struct stat st{};
+    if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size == 0) {
+        ::close(fd);
+        return {};
+    }
+    const auto size = static_cast<std::size_t>(st.st_size);
+    void* map = ::mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (map == MAP_FAILED) {
+        const std::string why = errno_text("cannot map", path);
+        ::close(fd);
+        return why;
+    }
+    char* const data = static_cast<char*>(map);
+    const std::string_view all(data, size);
+    std::string error;
+    if (all.find(from) == std::string_view::npos) {
+        // Most files: nothing to do.
+    } else if (all.substr(0, 8192).find('\0') != std::string_view::npos) {
+        // A binary: each C string holding the prefix, rewritten in place.
+        if (to.size() > from.size()) {
+            error =
+                path + ": cannot relocate a program to a longer folder (" + std::string(to) + ")";
+        }
+        for (std::size_t at = all.find(from); error.empty() && at != std::string_view::npos;) {
+            std::size_t end = all.find('\0', at);
+            if (end == std::string_view::npos) {
+                end = size;
+            }
+            const std::string now = replaced(all.substr(at, end - at), from, to);
+            std::memcpy(data + at, now.data(), now.size());
+            std::memset(data + at + now.size(), 0, end - at - now.size());
+            at = all.find(from, end);
+        }
+        if (error.empty() && ::msync(map, size, MS_SYNC) != 0) {
+            error = errno_text("cannot write", path);
+        }
+    } else {
+        // Text (a script, a #! line, a .pc, a .cfg): rewritten whole.
+        const std::string now = replaced(all, from, to);
+        const std::string part = path + ".relocating";
+        const int out =
+            ::open(part.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, st.st_mode & 07777U);
+        bool ok = out >= 0;
+        for (std::size_t done = 0; ok && done < now.size();) {
+            const ssize_t n = ::write(out, now.data() + done, now.size() - done);
+            if (n < 0 && errno == EINTR) {
+                continue;
+            }
+            ok = n > 0;
+            done += ok ? static_cast<std::size_t>(n) : 0;
+        }
+        if (out >= 0) {
+            ok = ::fchmod(out, st.st_mode & 07777U) == 0 && ::close(out) == 0 && ok;
+        }
+        if (!ok || ::rename(part.c_str(), path.c_str()) != 0) {
+            error = errno_text("cannot rewrite", path);
+            static_cast<void>(::unlink(part.c_str()));
+        }
+    }
+    ::munmap(map, size);
+    ::close(fd);
+    return error;
 }
 
 /// `path`'s parents, made as needed (0755).
@@ -122,7 +254,8 @@ constexpr std::size_t out_bytes = std::size_t{128} * 1024;
 /// bytes), then the entry's data, padded to 512.
 class TarWriter {
 public:
-    TarWriter(std::string_view root, std::string_view meta) : root_(root), meta_(meta) {}
+    TarWriter(std::string_view root, std::string_view meta)
+        : root_(root), meta_(meta), to_(relocate_target(root)) {}
     TarWriter(const TarWriter&) = delete;
     TarWriter& operator=(const TarWriter&) = delete;
     TarWriter(TarWriter&&) = delete;
@@ -201,6 +334,11 @@ private:
                 error_ = errno_text("cannot write", path_);
             }
             fd_ = -1;
+            // Another app's folder: sqterm's, in what the file keeps, made its.
+            if (relocating_ && error_.empty() && data_left_ == 0) {
+                error_ = relocate(path_, to_);
+            }
+            relocating_ = false;
         }
     }
 
@@ -270,6 +408,8 @@ private:
                     error_ = errno_text("cannot create", path_);
                     return;
                 }
+                relocating_ = !to_.empty() &&
+                              !path_.starts_with(meta_.empty() ? root_ + "/SQ-INF/" : meta_ + "/");
                 ++files_;
                 if (data_left_ == 0) {
                     close_file();
@@ -282,7 +422,9 @@ private:
                 return;
             case '2':
                 static_cast<void>(::unlink(path_.c_str()));
-                if (::symlink(std::string(link).c_str(), path_.c_str()) != 0) {
+                if (::symlink((to_.empty() ? std::string(link) : replaced(link, built_prefix, to_))
+                                  .c_str(),
+                              path_.c_str()) != 0) {
                     error_ = errno_text("cannot link", path_);
                 }
                 return;
@@ -330,6 +472,8 @@ private:
 
     std::string root_;
     std::string meta_;
+    std::string to_;  // the folder to relocate to; empty: sqterm's own
+    bool relocating_ = false;
     std::string path_;
     std::array<char, 512> header_{};
     std::size_t header_used_ = 0;
@@ -416,6 +560,22 @@ std::string unpack(std::string_view archive, std::string_view prefix, std::strin
         error = tar.error();
     }
     return error;
+}
+
+int relocation_of(const char* prefix, char* out, unsigned long out_size) {
+    const std::string to = relocate_target(prefix != nullptr ? prefix : "");
+    if (out != nullptr && out_size > 0) {
+        std::snprintf(out, out_size, "%s", to.c_str());
+    }
+    return to.empty() ? 0 : 1;
+}
+
+int relocate_file(const char* path, const char* to, char* error, unsigned long error_size) {
+    const std::string failed = relocate(path, to);
+    if (error != nullptr && error_size > 0) {
+        std::snprintf(error, error_size, "%s", failed.c_str());
+    }
+    return failed.empty() ? 0 : 1;
 }
 
 int unpack_archive(const char* archive, const char* prefix, const char* meta, char* error,

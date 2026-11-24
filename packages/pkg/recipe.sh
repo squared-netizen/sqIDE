@@ -15,7 +15,7 @@
 # and zstd's decoder, the same files as squared's and sq_app's copies: pkg
 # links them from there, once.
 
-version=2
+version=3
 license="sqterm's own"
 file=
 top=
