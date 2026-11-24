@@ -10,7 +10,8 @@
 #
 # The package: the shell, its functions (the completion functions of other
 # systems left out), and etc/zshrc, sqterm's starting point for an
-# interactive shell (packages/zsh/zshrc), read before the user's ~/.zshrc.
+# interactive shell (packages/zsh/zshrc), read before the user's ~/.zshrc,
+# and etc/zsh/aliases.zsh, its aliases (packages/zsh/aliases.zsh).
 
 version=5.9.2
 license="MIT-like (zsh LICENCE)"
@@ -21,7 +22,7 @@ mirrors="https://downloads.sourceforge.net/project/zsh/zsh/$version/$file"
 sha256=36fa734374b44783582cec09bcd67822e2f992c779ec1624ab5596df078d2f81
 top=zsh-$version
 depends=ncurses
-keep="bin/zsh bin/zsh-$version share/zsh etc/zshrc share/licenses/zsh"
+keep="bin/zsh bin/zsh-$version share/zsh etc/zshrc etc/zsh/aliases.zsh share/licenses/zsh"
 
 recipe_patch() {
   # Here-documents and the like: /tmp/zsh* by default; Android has no /tmp
@@ -84,6 +85,8 @@ recipe_after() {
   ln -s zsh "bin/zsh-$version"
   mkdir -p etc share/licenses/zsh
   cp "$ROOT/packages/zsh/zshrc" etc/zshrc
+  mkdir -p etc/zsh
+  cp "$ROOT/packages/zsh/aliases.zsh" etc/zsh/aliases.zsh
   # Its licence travels with it.
   cp "$src/LICENCE" share/licenses/zsh/LICENCE
 }

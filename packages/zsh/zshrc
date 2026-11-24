@@ -71,13 +71,11 @@ export LS_COLORS='rs=0:di=1;96:ln=95:mh=95:pi=33:so=35:do=35:bd=1;33:cd=1;33:or=
 ':*.tar=33:*.tgz=33:*.gz=33:*.xz=33:*.zst=33:*.zip=33:*.bz2=33:*.7z=33:*.sq=1;93:*.apk=1;93:*.deb=33'\
 ':*.png=35:*.jpg=35:*.jpeg=35:*.gif=35:*.svg=35:*.webp=35:*.ttf=35:*.otf=35:*.mp3=35:*.ogg=35:*.wav=35:*.flac=35:*.mp4=35:*.mkv=35:*.webm=35'\
 ':*.o=90:*.a=90:*.so=90:*.pcm=90:*.d=90:*.log=90:*.tmp=90:*.part=90:*~=90'
-# sqls: ls with icons and colours (sqterm's own; plain ls when not installed).
-if (( $+commands[sqls] )); then
-  alias ls='sqls' ll='sqls -l' la='sqls -a' lt='sqls --tree'
-else
-  alias ls='ls --color=auto' ll='ls -lh' la='ls -A'
-fi
-alias grep='grep --color=auto'
+# The aliases (ls is sqls, ll, la, lt, cls, .., git's and the SDK's): a
+# file of their own, $PREFIX/etc/zsh/aliases.zsh; ~/.zshrc can change any.
+_sqterm_aliases=${PREFIX:-/data/data/dev.squared.sqterm/files/usr}/etc/zsh/aliases.zsh
+[[ -r $_sqterm_aliases ]] && source $_sqterm_aliases
+unset _sqterm_aliases
 
 # Completion: case does not matter (unless typed in capitals), a part of a
 # name is enough (f.b for foo.bar, then any piece of the name), matches in
