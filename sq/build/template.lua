@@ -1,9 +1,9 @@
 -- sq/build/template.lua: template.android.cpp's build, for sqmake (0.8.1 or
--- later): squared, the app's native library and its APK, as the template's
--- make files build them (Makefile, mk/), with no shell; sqmake's verbs
+-- later): squared, the app's native library and its APK, with no shell;
+-- sqmake's verbs
 -- (install, run) and Android's own words (logcat, devices, uninstall) from
 -- squared's Android platform (squared/build/android.lua). `sqmake --debug
--- VERB` is make's `make dev` build (below). A project's build.lua says what
+-- VERB` is the debug build (below). A project's build.lua says what
 -- is its own and includes this:
 --
 --   app = {name = "mygame"}
@@ -31,15 +31,18 @@
 --     package = nil,              -- the manifest's package: for run, uninstall
 --     device = {"bash", "tools/device.sh"},
 --                                 -- what talks to the device (build/android.lua)
---     sqgen = "sqgen",            -- for sq_app/names.json, sq_app/layouts/
+--     sqgui_gen = "sqgui-gen",    -- for sq_app/names.json, sq_app/layouts/
 --     sqconsole = "sqconsole",    -- `sqmake console`: a debug build's Console
 --   }
+--
+-- Kits add to it through their own sq/build/kit_*.lua (below).
 --
 -- The template's layout: sq_app/src/**/*.cpp (the app), sq_android/*.cpp
 -- (the platform side), sq_app/third_party/**/*.c, sq_android/AndroidManifest.xml,
 -- res/ and assets/. classes.dex is squared's shims (tools/dexgen/shims.dex,
 -- committed): nothing is built to run during the build. An app with
--- sq_app/names.json or sq_app/layouts/ needs sqgen, the SDK's.
+-- sq_app/names.json or sq_app/layouts/ needs sqgui-gen, the SDK's (pkg
+-- install sqgui).
 
 local a = app or error("sq/build/template.lua: set app = {name = ...} before including it")
 local name = a.name or error("sq/build/template.lua: app.name")
@@ -88,7 +91,7 @@ else
 end
 local api = a.min_sdk or 28
 
--- POSIX cksum (what make's build hashes the package with for the port).
+-- POSIX cksum (what the Console's port is made from: the package's).
 local function cksum(s)
   local t = {}
   for i = 0, 255 do
@@ -106,7 +109,7 @@ local function cksum(s)
   return (~crc) & 0xffffffff
 end
 
--- The debug build (`sqmake --debug`, in build/debug): make's `make dev`, a
+-- The debug build (`sqmake --debug`, in build/debug): a
 -- CONSOLE=app DEV_LOG=1 build, debuggable so run-as reaches it. Its Console
 -- and its log are the app's (squared's libraries are the same either way).
 local debug_flags = {}
@@ -116,7 +119,7 @@ if mode.debug then
     debug_flags[#debug_flags + 1] = "-DSQUARED_CONSOLE=1"
     -- Its bridge, which sqconsole reaches (`sqmake console`): a port from
     -- the package and a secret made once, in build/dev/bridge.conf, the
-    -- file make's CONSOLE build keeps (the same port: POSIX cksum).
+    -- file the Console client reads (sqconsole: the same port, POSIX cksum).
     if a.package then
       local port = 20000 + cksum(a.package) % 20000
       local conf = "build/dev/bridge.conf"
@@ -155,15 +158,27 @@ add(glob("sq_app/src/**/*.cpp"))
 add(glob("sq_android/*.cpp"))
 add(glob("sq_app/third_party/**/*.c"))
 local glue = sq .. "/third_party/native_app_glue"
--- Google's code, with its own warnings: compiled without the app's (make's
+-- Google's code, with its own warnings: compiled without the app's (squared's
 -- build compiles it so too), and linked as an object, not from an archive.
 local glue_obj = rules.cc(glue .. "/android_native_app_glue.c", {optimise and {"-O2"} or {"-O0", "-g"}, "-fPIC", "-w", "-I" .. glue})
 
--- sqgen (squared/tools/sqgen): sq_app/names.json and sq_app/layouts/*.json
+-- Kits: every sq/build/kit_*.lua (a kit's, generated; kit.opengl's, say)
+-- returns what it adds, {id, flags, link, srcs}, in the order of their
+-- names: square adds and updates a kit by its file, never this one.
+local kit_flags, kit_link = {}, {}
+for _, file in ipairs(glob("sq/build/kit_*.lua")) do
+  local k = include(file)
+  if type(k) ~= "table" then error(file .. ": a kit's build file returns {id, flags, link, srcs}", 0) end
+  kit_flags[#kit_flags + 1] = k.flags or {}
+  kit_link[#kit_link + 1] = k.link or {}
+  add(k.srcs or {})
+end
+
+-- sqgui-gen (sqgui's; once squared's sqgen): sq_app/names.json and sq_app/layouts/*.json
 -- into C++ (names.hpp, layouts.hpp, layouts.cpp in build/gen), for an app
 -- with either; the app's sources include them, so every compile waits. An
--- app with neither builds without it. sqgen is the SDK's, on PATH (or
--- app.sqgen), as sqedit is.
+-- app with neither builds without it. sqgui-gen is the SDK's, on PATH (or
+-- app.sqgui_gen; app.sqgen, its old name, still says so), as sqedit is.
 local gen_flags, after = {}, {}
 local names = glob("sq_app/names.json")
 local layouts = glob("sq_app/layouts/*.json")
@@ -174,14 +189,14 @@ if #names + #layouts > 0 then
   for _, f in ipairs(names) do inputs[#inputs + 1] = f end
   for _, f in ipairs(layouts) do inputs[#inputs + 1] = f end
   local listed = write_file(gen .. "/inputs", table.concat(inputs, "\n") .. "\n")
-  local cmd = {a.sqgen or "sqgen"}
+  local cmd = {a.sqgui_gen or a.sqgen or "sqgui-gen"}
   if #names > 0 then cmd[#cmd + 1] = {"--names", names[1]} end
   if #layouts > 0 then cmd[#cmd + 1] = {"--layouts", "sq_app/layouts"} end
   cmd[#cmd + 1] = {"--out", gen}
   local cpp = gen .. "/layouts.cpp"
-  -- touch: sqgen leaves an unchanged file as it was.
-  target{out = cpp, ins = {inputs, listed}, desc = "sqgen", cmds = {cmd, {"touch", cpp}}}
-  -- What layouts.cpp imports (tools/sqgen writes these three).
+  -- touch: sqgui-gen leaves an unchanged file as it was.
+  target{out = cpp, ins = {inputs, listed}, desc = "sqgui-gen", cmds = {cmd, {"touch", cpp}}}
+  -- What layouts.cpp imports (sqgui-gen writes these three).
   srcs[#srcs + 1] = {cpp, imports = {"sq.gui", "sq.messaging", "std"}}
   gen_flags = {"-I" .. gen}
   after = {cpp}
@@ -191,7 +206,7 @@ end
 -- squared_font's, not the app's to export; nor is the C++ runtime's (the
 -- runtimes package's libc++.a carries the unwinder too).
 -- Android's libraries, named by path in the sysroot (a bare -lEGL could bind
--- another EGL; mk/pkg_squared_core.mk says why).
+-- another EGL, such as libglvnd's X11 one on a desktop sysroot).
 local platform = t.sysroot .. "/usr/lib/aarch64-linux-android/" .. api
 local so = shlib{
   name = name,
@@ -199,11 +214,11 @@ local so = shlib{
   objs = {glue_obj},
   deps = {squared.all},
   after = after,
-  flags = {gen_flags, debug_flags, optimise and {"-O2"} or {"-O0", "-g"}, "-Wall", "-Wextra", "-Wpedantic", "-fPIC", "-fvisibility=hidden", "-DANDROID", "-I" .. glue, a.flags or {}},
+  flags = {gen_flags, debug_flags, optimise and {"-O2"} or {"-O0", "-g"}, "-Wall", "-Wextra", "-Wpedantic", "-fPIC", "-fvisibility=hidden", "-DANDROID", "-I" .. glue, kit_flags, a.flags or {}},
   link = {"-Wl,--hash-style=both", "-Wl,--gc-sections", "-Wl,--no-undefined",
           "-Wl,--exclude-libs,libsquared_font.a",
           "-Wl,--exclude-libs,libsquared_freetype.a", "-Wl,--exclude-libs,libc++.a:libc++abi.a:libunwind.a", "-pthread", "-landroid", "-llog",
-          platform .. "/libEGL.so", platform .. "/libGLESv3.so", a.link or {}},
+          platform .. "/libEGL.so", platform .. "/libGLESv3.so", kit_link, a.link or {}},
 }
 
 -- The APK's copy is stripped (--strip-unneeded keeps the dynamic symbols the
@@ -215,7 +230,7 @@ target{out = stripped, ins = {so}, desc = "strip lib" .. name .. ".so", cmds = {
 }}
 
 -- The manifest: as written, or with the background service added
--- (mk/squared_android_package.mk, BACKGROUND=1), each change made once.
+-- (app.background), each change made once.
 local manifest = "sq_android/AndroidManifest.xml"
 if a.background then
   local out = toolchain.build .. "/background/AndroidManifest.xml"

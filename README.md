@@ -37,7 +37,7 @@ Where it stands (Sprint 12 of the squared plan):
   with a Keyboard button; a swipe left or a tap beside it puts it away.
   Settings will go in it.
 - 12.5a, zsh: sqterm's own prefix (`files/usr`, Termux's way), filled from
-  packages the APK carries. `make packages` builds ncurses 6.6 and zsh 5.9.2
+  packages the APK carries. `sqmake packages` builds ncurses 6.6 and zsh 5.9.2
   for it on the phone, with the NDK, for API 22 (`packages/`); the app
   unpacks them the first time it starts and runs zsh, with PATH, HOME, TERM
   and a starting `$PREFIX/etc/zshrc`. A build without them runs Android's sh,
@@ -47,21 +47,8 @@ Where it stands (Sprint 12 of the squared plan):
 
 ## Build and install
 
-On the phone, in Termux, from this folder:
-
-```sh
-make packages # the prefix's packages (once, and when a recipe changes)
-make dev      # a debug build with the Console, installed
-make apk      # a plain APK in build/
-```
-
-`make packages` needs curl, xz and zstd in Termux (`pkg install curl xz-utils
-zstd`) and the NDK the APK builds use; see `packages/README.md`.
-
-The Makefile's head lists every target.
-
-Or with sqmake, the SDK's build tool, in sqterm itself (`pkg install sqmake
---from repo` brings the rest of the toolchain), from `build.lua`:
+With sqmake, the SDK's build tool, in sqterm itself (`pkg install sqmake`
+brings the rest of the toolchain), from `build.lua`. There is no Makefile.
 
 ```sh
 sqmake           # build/sqterm.apk, signed with ~/.android/apkpack.pem
@@ -69,13 +56,15 @@ sqmake install   # install it (with adb on this phone: no prompt)
 sqmake run       # install, then start it (adb)
 sqmake logcat    # its log, and Android's crash lines (adb)
 sqmake devices   # what adb reaches, and how to connect
-sqmake --debug install   # make dev's build: the Console, DEV_LOG, debuggable
+sqmake --debug install   # the debug build: the Console, DEV_LOG, debuggable
                          # (in build/debug, so switching rebuilds neither)
 sqmake console           # that build's Console, here (sqconsole)
+sqmake packages          # the prefix's packages, built here (packages/README.md);
+                         # or tools/fetch_packages.sh takes CI's
 ```
 
-It builds the same APK as `make apk` and reaches the device the same way
-(tools/device.sh); `sq/build/template.lua` says how.
+It reaches the device through tools/device.sh; `sq/build/template.lua` says
+how.
 
 ## Layout
 
@@ -85,11 +74,10 @@ sq_app/src/         the app (yours): main.cpp, shell.cpp (the model),
                     prefix.cpp (the packages, unpacked)
 sq_app/third_party/ zstd's decoder, for the packages
 sq_android/         the platform layer, from the template; assets/fonts/, and
-                    assets/packages/ once make packages has run (not in git)
+                    assets/packages/ once sqmake packages or tools/fetch_packages.sh has run (not in git)
 packages/           the prefix's recipes and their build: build.sh, ncurses/, zsh/
 terminfo/sqterm.ti  TERM=sqterm: what the emulator implements (in the ncurses package)
 squared/            the framework, vendored: never edited here
-mk/                 the template's and the package's make fragments
 tools/              vendor_framework.sh: squared from the package
 ```
 
@@ -102,7 +90,7 @@ the package's latest:
 tools/vendor_framework.sh --latest
 ```
 
-then commit `squared/`, `SQUARED_REV` and `mk/`.
+then commit `squared/` and `SQUARED_REV`.
 
 ## Licences
 
