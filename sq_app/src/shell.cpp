@@ -47,7 +47,8 @@ constexpr std::array<std::string_view, 1> login{"-l"};
 
 Shell::Shell(Places places)
     : places_(std::move(places)),
-      terminal_(sq::term::TerminalConfig{.columns = 80, .rows = 24}),
+      terminal_((load_theme(places_.home),
+                 sq::term::TerminalConfig{.columns = 80, .rows = 24, .palette = theme().palette})),
       buffer_(std::make_unique_for_overwrite<std::byte[]>(buffer_bytes)) {}
 
 Shell::~Shell() = default;

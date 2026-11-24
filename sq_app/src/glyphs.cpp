@@ -5,7 +5,9 @@
 // JetBrains Mono NL (the family without ligatures: a terminal draws one cell
 // at a time), regular and bold, bundled in the APK and mapped from it, not
 // read into memory: FreeType reads the pages it needs, and Android may drop
-// them. What they lack (CJK, symbols) comes from Android's own fonts. Glyphs
+// them. Then Nerd Fonts' Symbols Only (Mono: one cell each), for the icons
+// ls, prompts and editors draw from the Private Use Area (file types, git,
+// powerline). What they lack (CJK, emoji) comes from Android's own fonts. Glyphs
 // are rendered once, as they first appear, into one 1024 x 1024 coverage
 // image, and the texture takes only the rectangle that changed.
 
@@ -19,6 +21,8 @@ namespace {
 
 constexpr std::string_view regular_path = "fonts/JetBrainsMonoNL-Regular.ttf";
 constexpr std::string_view bold_path = "fonts/JetBrainsMonoNL-Bold.ttf";
+// Nerd Fonts v3.4.0, NerdFontsSymbolsOnly.zip (MIT: fonts/SymbolsNerdFont.LICENSE).
+constexpr std::string_view symbols_path = "fonts/SymbolsNerdFontMono-Regular.ttf";
 
 }  // namespace
 
@@ -50,6 +54,15 @@ bool Glyphs::prepare(sq::files::FileSystem& files, std::uint16_t pixels) {
         if (bold && !bold_face.open_memory(bold.file.bytes()) &&
             !fonts_.set_bold(std::move(bold_face))) {
             bold_file_ = std::move(bold.file);  // else bold is made by emboldening
+        }
+        // The icons: after JetBrains Mono, before Android's fonts (whose own
+        // Private Use Area glyphs, if any, are not these). Without it, as
+        // before: the icons fall to Android's fonts, or a box.
+        sq::files::MapResult symbols = files.map(sq::files::FileType::Internal, symbols_path);
+        sq::font::Face symbols_face;
+        if (symbols && !symbols_face.open_memory(symbols.file.bytes()) &&
+            !fonts_.add(std::move(symbols_face))) {
+            symbols_file_ = std::move(symbols.file);
         }
         static_cast<void>(fonts_.add_system_fallbacks());
         opened_ = true;
