@@ -47,8 +47,8 @@ constexpr std::array<std::string_view, 1> login{"-l"};
 
 Shell::Shell(Places places)
     : places_(std::move(places)),
-      terminal_((load_theme(places_.home),
-                 sq::term::TerminalConfig{.columns = 80, .rows = 24, .palette = theme().palette})),
+      theme_(read_theme(places_.home)),
+      terminal_(sq::term::TerminalConfig{.columns = 80, .rows = 24, .palette = theme_.palette}),
       buffer_(std::make_unique_for_overwrite<std::byte[]>(buffer_bytes)) {}
 
 Shell::~Shell() = default;
@@ -70,9 +70,9 @@ void Shell::install(sq::messaging::Telegraph& t) {
         say({line.data(), static_cast<std::size_t>(n > 0 ? n : 0)});
         publish(t);  // shown as it goes: the first start takes a few seconds
         // package.name is "name version".
-        const std::string error = unpack_package(
-            package.archive, places_.prefix,
-            std::string_view(package.name).substr(0, package.name.find(' ')));
+        const std::string error =
+            unpack_package(package.archive, places_.prefix,
+                           std::string_view(package.name).substr(0, package.name.find(' ')));
         if (!error.empty()) {
             // The whole message: a path cut at 100 characters misled (2026-11-17).
             say("[sqterm: " + error + "]\r\n");
@@ -177,6 +177,14 @@ void Shell::receive(sq::messaging::Telegraph& t, const sq::messaging::Received& 
         }
     } else if (to == addresses::copy.name()) {
         copy(t, received.data);
+    } else if (to == addresses::theme.name()) {
+        // Settings changed theme.json: the palette from it, for what the
+        // shell writes from now on (what is on the screen keeps its colours),
+        // and the widget told to read its part again.
+        theme_ = read_theme(places_.home);
+        terminal_.set_palette(theme_.palette);
+        static_cast<void>(t.state(addresses::theme_generation, ++theme_generation_));
+        publish(t);
     } else if (to == addresses::scroll.name()) {
         const std::int64_t lines = received.telegram.as_integer();
         publisher_.scroll_back(lines > 0 ? static_cast<std::size_t>(lines) : 0);
