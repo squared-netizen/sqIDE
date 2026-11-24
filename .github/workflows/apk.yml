@@ -10,15 +10,13 @@
 # libGLESv3), and carry the C++ runtime inside; packed and signed by
 # apkpack, with no Java and no Android SDK, and the build's text work done
 # by sqedit (both built here first, at the tags their recipes pin).
-# Installing and starting it is the phone's part (make dev).
+# Installing and starting it is the phone's part (sqmake --debug install).
 name: apk
 
 on:
   push:
     branches: [main]
     paths:
-      - Makefile
-      - mk/**
       - sq_app/**
       - sq_android/**
       - squared/**
@@ -32,8 +30,6 @@ on:
       - .github/workflows/apk.yml
   pull_request:
     paths:  # the same list as push
-      - Makefile
-      - mk/**
       - sq_app/**
       - sq_android/**
       - squared/**
@@ -128,48 +124,24 @@ jobs:
             echo "::warning::no APKPACK_KEY secret: signing with a key made for this run"
           fi
 
-      - name: Build the APK (SQ_TOOLCHAIN=1)
+      - name: Build the APK (sqmake, build.lua)
         run: |
           set -euo pipefail
           # The NDKs out of sight: a path into one would fail to resolve.
           sudo mv "$ANDROID_HOME/ndk" "$RUNNER_TEMP/ndk-hidden" 2>/dev/null || true
           clang --version | head -n 1
-          make -j4 SQ_TOOLCHAIN=1 status 2>&1 | tail -n 30 || true
-          make -j4 SQ_TOOLCHAIN=1 apk
+          sqmake --version
+          sqmake -j4
           apkpack verify build/sqterm.apk
 
+      # What the native library needs at run time: Android's libraries only,
+      # the C++ runtime linked in (an APK carries no libc++_shared.so).
       - name: What it links
         run: |
-          so=$(ls build/lib/*/libsqterm.so 2>/dev/null || find build -name 'libsqterm.so' | head -n 1)
+          so=$(find build -name 'libsqterm.so' | head -n 1)
           llvm-readelf -d "$so" | sqedit match -F NEEDED
           ! llvm-readelf -d "$so" | sqedit match -q '"NEEDED" (!("c++" / "unwind") .)* ("c++" / "unwind")'
           ls -l build/*.apk
-
-      # The same APK from build.lua with sqmake (no make, no shell), in a
-      # copy of the tree so make's build/ is left as it was, signed with the
-      # key the make build used. The two must hold the same entries, each
-      # the same but the native library (sqmake's exports less: the static
-      # C++ runtime and FreeType stay inside).
-      - name: The same APK with sqmake (build.lua)
-        run: |
-          set -euo pipefail
-          sqm=$RUNNER_TEMP/sqmake-build
-          mkdir -p "$sqm"
-          git archive HEAD | tar -x -C "$sqm"
-          sqmake --version
-          sqmake -C "$sqm" -j4
-          a=build/sqterm.apk b=$sqm/build/sqterm.apk
-          apkpack verify "$b"
-          diff <(unzip -Z1 "$a" | sort) <(unzip -Z1 "$b" | sort) ||
-            { echo "::error::make's APK and sqmake's hold different entries"; exit 1; }
-          while read -r entry; do
-            case $entry in lib/*) continue ;; esac
-            cmp -s <(unzip -p "$a" "$entry") <(unzip -p "$b" "$entry") ||
-              { echo "::error::$entry differs between make's APK and sqmake's"; exit 1; }
-          done < <(unzip -Z1 "$a")
-          echo "make's APK and sqmake's: the same entries, each the same but lib/"
-          unzip -l "$a" 'lib/*'
-          unzip -l "$b" 'lib/*'
 
       # Run by hand with `release` ticked: two APKs as a prerelease to install
       # on the phone, each with its packages from the `packages` release
@@ -189,8 +161,7 @@ jobs:
           files=()
           for bundle in basic all; do
             bash tools/fetch_packages.sh --bundle "$bundle"
-            rm -f build/sqterm.apk
-            make -j4 SQ_TOOLCHAIN=1 apk
+            sqmake -j4
             got=$(apkpack verify build/sqterm.apk)
             echo "$got"
             [ "${got##* }" = "$want" ] ||
