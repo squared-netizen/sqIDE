@@ -9,6 +9,14 @@ the tools in use, C, C++ or Lua only. GitHub Actions builds them with the same
 script (`.github/workflows/packages.yml`, decided 2026-11-04) and publishes
 them as a release.
 
+**Another app's folder.** Packages are built once, for sqterm's folder, and
+some keep it (zsh's `/etc/zshrc`, git's exec path, `#!` lines). sqIDE, which
+has its own folder, installs the same packages: the unpacker (the app's and
+`pkg`'s, `sq_app/src/unpack.cpp`) rewrites sqterm's folder to the app's in
+each file as it lands. A program is patched in place, so the app's folder
+must be no longer than sqterm's (`/data/data/dev.squared.sqide/files/usr` is
+one shorter).
+
 **Two kinds of package.** What `pkg` installs here are *sqterm packages*:
 programs and files for sqterm's prefix (zsh, llvm, sqmake, sqedit, and
 `squared`, which carries squared's sources for every workspace to build
