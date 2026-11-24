@@ -63,9 +63,10 @@ sqmake/           sqmake 0.10.0 (MIT): the SDK's build system, build.lua in
                   Lua 5.4; finds the toolchain itself from squared's
                   build/toolchain.lua (sqmake toolchain); C++23 modules,
                   built as sqdrive is
-sqgui/            sqgui 0.1.0 (MIT): sqgui-gen, the layout compiler an app's
+sqgui/            sqgui 0.2.0 (MIT): sqgui-gen, the layout compiler an app's
                   build runs on names.json and layouts/ (once squared's
-                  sqgen); built with sqmake (0.10.0, built first for the
+                  sqgen), and sqgui, the editor's viewer (sqgui view: the
+                  layouts in the terminal); built with sqmake (0.10.0, built first for the
                   build machine) against the squared sqterm carries
 sqgen/            sqgen 0.2.0: bin/sqgen, a link to sqgui-gen, for a
                   workspace whose build still runs sqgen
@@ -80,7 +81,7 @@ neovim/           neovim 0.12.6 (Apache-2.0 and Vim): nvim, its runtime
                   (cmake.deps, from the recipe's `extra` files); CMake on the
                   build machine, so CI builds it (not in the APK: pkg install
                   neovim)
-squared-pg/       sqpg 0.1.0-alpha.2 (MIT): the SDK's workspace generator
+squared-pg/       sqpg 0.1.0-alpha.3 (MIT): the SDK's workspace generator
                   (sqpg new), with sqcart and squared's templates, kits and
                   packages at the commits squared-pg pins (`extra` files);
                   in share/squared-pg, linked from bin (not in the APK: pkg
