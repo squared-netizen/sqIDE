@@ -81,7 +81,7 @@ neovim/           neovim 0.12.6 (Apache-2.0 and Vim): nvim, its runtime
                   (cmake.deps, from the recipe's `extra` files); CMake on the
                   build machine, so CI builds it (not in the APK: pkg install
                   neovim)
-squared-pg/       sqpg 0.1.0-alpha.2 (MIT): the SDK's workspace generator
+squared-pg/       sqpg 0.1.0-alpha.3 (MIT): the SDK's workspace generator
                   (sqpg new), with sqcart and squared's templates, kits and
                   packages at the commits squared-pg pins (`extra` files);
                   in share/squared-pg, linked from bin (not in the APK: pkg

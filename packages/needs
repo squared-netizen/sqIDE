@@ -30,9 +30,10 @@ git: bash
 # apkpack, sqgui, sqconsole and sqdrive are each one static
 # program: they need nothing.
 sqmake: llvm sqedit apkpack sqgui sqconsole
-# sqpg makes a workspace for sqmake to build, with squared's framework;
+# sqpg makes a workspace for sqmake to build, with squared's framework
+# (and sqgui's sqgui-gen for an app's layouts);
 # square answers questions about it (its resources are squared-pg's).
-squared-pg: sqmake squared
+squared-pg: sqmake squared sqgui
 square: squared-pg
 # sqgen is the old name for sqgui-gen: a link to it.
 sqgen: sqgui
