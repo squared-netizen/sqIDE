@@ -101,8 +101,6 @@ constexpr double edge_scroll_seconds = 0.06;
 /// the most a telegram can carry).
 constexpr std::size_t paste_piece = 1024;
 
-constexpr sq::graphics::Color selection_color{
-    .red = 0.24F, .green = 0.50F, .blue = 0.95F, .alpha = 0.40F};
 constexpr sq::graphics::Color handle_color{
     .red = 0.24F, .green = 0.55F, .blue = 0.99F, .alpha = 1.0F};
 constexpr sq::graphics::Color bar_color{
@@ -116,18 +114,20 @@ constexpr sq::graphics::Color drawer_button_color{
 constexpr sq::graphics::Color bar_text_color{
     .red = 0.95F, .green = 0.95F, .blue = 0.95F, .alpha = 1.0F};
 
-constexpr sq::graphics::Color default_foreground{
-    .red = 0.86F, .green = 0.86F, .blue = 0.84F, .alpha = 1.0F};
-constexpr sq::graphics::Color default_background{
-    .red = 0.07F, .green = 0.07F, .blue = 0.08F, .alpha = 1.0F};
-
-[[nodiscard]] sq::graphics::Color color_of(sq::term::Rgb rgb) noexcept {
+[[nodiscard]] sq::graphics::Color color_of(sq::term::Rgb rgb, float alpha = 1.0F) noexcept {
     constexpr float unit = 1.0F / 255.0F;
     return {.red = static_cast<float>(rgb.r) * unit,
             .green = static_cast<float>(rgb.g) * unit,
             .blue = static_cast<float>(rgb.b) * unit,
-            .alpha = 1.0F};
+            .alpha = alpha};
 }
+
+// The theme's (theme.cpp): where a program chooses no colour, the cursor,
+// and the selection, laid over the text at a little over half strength.
+[[nodiscard]] sq::graphics::Color default_foreground() noexcept { return color_of(theme().foreground); }
+[[nodiscard]] sq::graphics::Color default_background() noexcept { return color_of(theme().background); }
+[[nodiscard]] sq::graphics::Color cursor_color() noexcept { return color_of(theme().cursor); }
+[[nodiscard]] sq::graphics::Color selection_color() noexcept { return color_of(theme().selection, 0.6F); }
 
 [[nodiscard]] sq::graphics::Color mix(sq::graphics::Color a, sq::graphics::Color b,
                                       float t) noexcept {
@@ -138,7 +138,7 @@ constexpr sq::graphics::Color default_background{
 }
 
 /// A cell's colours as drawn: the theme's for the defaults, swapped for
-/// inverse (and for the cursor's cell), faint halfway to the background,
+/// inverse, the theme's cursor colour for the cursor's cell, faint halfway to the background,
 /// concealed as the background.
 struct Colors {
     sq::graphics::Color foreground;
@@ -149,12 +149,18 @@ struct Colors {
 [[nodiscard]] Colors colors_of(const sq::term::Cell& cell, bool cursor) noexcept {
     Colors out{
         .foreground =
-            cell.flags.default_foreground ? default_foreground : color_of(cell.foreground),
+            cell.flags.default_foreground ? default_foreground() : color_of(cell.foreground),
         .background =
-            cell.flags.default_background ? default_background : color_of(cell.background),
+            cell.flags.default_background ? default_background() : color_of(cell.background),
         .default_background = cell.flags.default_background,
     };
-    if (cell.attributes.inverse != cursor) {
+    if (cursor) {
+        // The cursor's cell: the theme's cursor colour, its glyph in the
+        // background's, whatever the program asked for there.
+        out.background = cursor_color();
+        out.foreground = default_background();
+        out.default_background = false;
+    } else if (cell.attributes.inverse) {
         std::swap(out.foreground, out.background);
         out.default_background = false;
     }
@@ -294,10 +300,10 @@ void TerminalView::act(double delta_seconds) {
 
 void TerminalView::paint(sq::gui::Painter& painter, const sq::gui::Skin& /*skin*/, float stage_x,
                          float stage_y) const {
-    painter.fill_rectangle({stage_x, stage_y, width(), height()}, default_background);
+    painter.fill_rectangle({stage_x, stage_y, width(), height()}, default_background());
     if (glyphs_.failed()) {
         painter.draw_text("sqterm: the bundled font does not open (assets/fonts/)", stage_x + 8.0F,
-                          stage_y + 8.0F, default_foreground);
+                          stage_y + 8.0F, default_foreground());
         return;
     }
     if (!view_ || !glyphs_.ready() || scale_ <= 0.0F || !glyphs_.texture().has_content()) {
@@ -359,7 +365,7 @@ void TerminalView::paint(sq::gui::Painter& painter, const sq::gui::Skin& /*skin*
             painter.fill_rectangle(
                 {x0 + (static_cast<float>(from) * cell_w_), y0 + (static_cast<float>(r) * cell_h_),
                  static_cast<float>(to - from + 1) * cell_w_, cell_h_},
-                selection_color);
+                selection_color());
         }
     }
 

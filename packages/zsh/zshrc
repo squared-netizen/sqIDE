@@ -59,10 +59,23 @@ PROMPT='%F{green}%~%f %# '
 # where it has been (cd -<Tab> lists it).
 setopt auto_cd auto_pushd pushd_ignore_dups pushd_silent
 
-# Colours for files by their kind: ls, grep, and the completion menu.
-if (( $+commands[dircolors] )); then eval "$(dircolors -b)"; fi
-alias ls='ls --color=auto' ll='ls -lh' la='ls -A'
-alias grep='grep --color=auto'
+# Colours for files by their kind: ls, sqls, grep and the completion menu.
+# Named colours (30-37, 90-97), so they follow sqterm's theme (theme.json):
+# folders bright cyan, programs mint, links hot pink, source electric blue,
+# archives acid yellow, pictures and media violet, documents lavender,
+# dotfiles and build output muted.
+export LS_COLORS='rs=0:di=1;96:ln=95:mh=95:pi=33:so=35:do=35:bd=1;33:cd=1;33:or=1;91:mi=1;91:su=1;91:sg=1;91:ca=1;91:tw=1;96:ow=1;96:st=1;96:ex=1;92'\
+':*.cpp=94:*.cppm=94:*.hpp=94:*.h=94:*.c=94:*.cc=94:*.cxx=94:*.ixx=94:*.lua=96:*.py=94:*.sh=92:*.zsh=92:*.fish=92:*.rs=94:*.go=94:*.java=94:*.kt=94:*.js=94:*.ts=94'\
+':*.json=93:*.toml=93:*.yml=93:*.yaml=93:*.ini=93:*.conf=93:*.xml=93:*.peg=93'\
+':*.md=37:*.txt=37:*.rst=37:*.pdf=37:*LICENSE=37:*README=37'\
+':*.tar=33:*.tgz=33:*.gz=33:*.xz=33:*.zst=33:*.zip=33:*.bz2=33:*.7z=33:*.sq=1;93:*.apk=1;93:*.deb=33'\
+':*.png=35:*.jpg=35:*.jpeg=35:*.gif=35:*.svg=35:*.webp=35:*.ttf=35:*.otf=35:*.mp3=35:*.ogg=35:*.wav=35:*.flac=35:*.mp4=35:*.mkv=35:*.webm=35'\
+':*.o=90:*.a=90:*.so=90:*.pcm=90:*.d=90:*.log=90:*.tmp=90:*.part=90:*~=90'
+# The aliases (ls is sqls, ll, la, lt, cls, .., git's and the SDK's): a
+# file of their own, $PREFIX/etc/zsh/aliases.zsh; ~/.zshrc can change any.
+_sqterm_aliases=${PREFIX:-/data/data/dev.squared.sqterm/files/usr}/etc/zsh/aliases.zsh
+[[ -r $_sqterm_aliases ]] && source $_sqterm_aliases
+unset _sqterm_aliases
 
 # Completion: case does not matter (unless typed in capitals), a part of a
 # name is enough (f.b for foo.bar, then any piece of the name), matches in
@@ -93,14 +106,22 @@ unset _sqterm_key
 # The prompt: the last command's status when it failed, the directory, and
 # inside a git repository its branch (when git is installed).
 setopt prompt_subst
+# Nerd Font icons (sqterm bundles the symbols): a folder before the path, a
+# branch before the git branch, and the prompt's arrow in hot pink; plain
+# text when SQTERM_NO_ICONS=1, or in a terminal that is not sqterm.
+if [[ -n $SQTERM && -z $SQTERM_NO_ICONS ]]; then
+  _sqterm_dir=' ' _sqterm_branch=' ' _sqterm_fail=' ' _sqterm_arrow='❯'  # nf-fa-folder_open, nf-pl-branch, nf-fa-close, ❯
+else
+  _sqterm_dir='' _sqterm_branch='' _sqterm_fail='' _sqterm_arrow='%#'
+fi
 if (( $+commands[git] )); then
   autoload -Uz vcs_info add-zsh-hook
   zstyle ':vcs_info:*' enable git
-  zstyle ':vcs_info:git:*' formats ' %F{magenta}%b%f'
-  zstyle ':vcs_info:git:*' actionformats ' %F{magenta}%b%f %F{red}%a%f'
+  zstyle ':vcs_info:git:*' formats " %F{13}${_sqterm_branch}%b%f"
+  zstyle ':vcs_info:git:*' actionformats " %F{13}${_sqterm_branch}%b%f %F{9}%a%f"
   add-zsh-hook precmd vcs_info
 fi
-PROMPT='%(?..%F{red}[%?]%f )%F{green}%~%f${vcs_info_msg_0_} %# '
+PROMPT="%(?..%F{9}${_sqterm_fail}%?%f )%F{14}${_sqterm_dir}%~%f\${vcs_info_msg_0_} %F{13}${_sqterm_arrow}%f "
 
 # The two plugins, each a package of its own, used when installed. The rest
 # of a line offered in grey as it is typed (the right arrow or End takes

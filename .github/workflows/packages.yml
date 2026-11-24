@@ -32,7 +32,6 @@ on:
       - SQUARED_REV
       - squared/build/squared.lua
       - squared/build/toolchain.lua
-      - squared/tools/sqgen/sqgen.cpp
       - squared/console/client/sqconsole.cpp
       - sq_app/third_party/zstd/**
       - squared/third_party/yyjson/**
@@ -54,7 +53,6 @@ on:
       - SQUARED_REV
       - squared/build/squared.lua
       - squared/build/toolchain.lua
-      - squared/tools/sqgen/sqgen.cpp
       - squared/console/client/sqconsole.cpp
       - sq_app/third_party/zstd/**
       - squared/third_party/yyjson/**

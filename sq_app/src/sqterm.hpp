@@ -53,6 +53,21 @@ struct Staged {
 };
 
 /// Where the shell runs: given by squared_main, from the app's private files.
+/// sqterm's colours (theme.cpp): the 16 named colours, the text and
+/// background where a program chooses none, the cursor and the selection.
+struct Theme {
+    std::string_view name;
+    sq::term::Rgb foreground;
+    sq::term::Rgb background;
+    sq::term::Rgb cursor;
+    sq::term::Rgb selection;
+    sq::term::Palette palette;
+};
+/// The theme in use: "cyberpunk dream", or what ~/.config/sqterm/theme.json changed.
+[[nodiscard]] const Theme& theme() noexcept;
+/// Reads `home`/.config/sqterm/theme.json, if there is one, over the default.
+void load_theme(std::string_view home);
+
 struct Places {
     std::string home;    ///< $HOME and where the shell starts
     std::string tmp;     ///< $TMPDIR: the prefix's tmp/
@@ -158,6 +173,7 @@ private:
 
     sq::files::MappedFile regular_file_;
     sq::files::MappedFile bold_file_;
+    sq::files::MappedFile symbols_file_;
     sq::font::FontSet fonts_;
     sq::font::GlyphAtlas atlas_{1024, 1024, 2048};
     sq::graphics::Texture texture_;
