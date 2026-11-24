@@ -12,7 +12,7 @@ maintained by one person, so a short note first saves everyone time.
 
 ## Before a pull request
 
-Build the app as the README describes (`make dev` on the phone). A change to a package recipe is checked by CI's packages workflow, which builds every package it affects; run `bash packages/build.sh NAME` locally when you can. Downloads belong only in `tools/fetch_packages.sh`.
+Build the app as the README describes (`sqmake --debug install` on the phone). A change to a package recipe is checked by CI's packages workflow, which builds every package it affects; run `bash packages/build.sh NAME` locally when you can. Downloads belong only in `tools/fetch_packages.sh`.
 
 The pull request's CI must be green before it is merged. Builds are
 offline: nothing in a build may download anything.

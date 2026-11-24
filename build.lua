@@ -1,8 +1,17 @@
--- build.lua: sqterm's build for sqmake (`sqmake`: build/sqterm.apk, signed
--- with ~/.android/apkpack.pem), the same app the Makefile builds:
--- `make apk BACKGROUND=1`; `sqmake install`, `run`, `logcat`, `devices`,
--- `uninstall` as make's (tools/device.sh). sq/build/template.lua
--- (template.android.cpp's, squared's to update) says every setting.
+-- build.lua: sqterm's build, for sqmake (there is no Makefile).
+--
+--   sqmake                 build/sqterm.apk, signed with ~/.android/apkpack.pem
+--   sqmake install         onto the phone (tools/device.sh); run, logcat,
+--                          devices, uninstall too, from squared's Android
+--                          platform (squared/build/android.lua)
+--   sqmake --debug VERB    the debug build (-O0 -g, debuggable)
+--   sqmake packages        the prefix's packages (packages/build.sh) into
+--                          sq_android/assets/packages/: offline, the sources
+--                          from tools/fetch_packages.sh --sources; or
+--                          tools/fetch_packages.sh puts CI's there instead
+--
+-- sq/build/template.lua (template.android.cpp's, squared's to update) says
+-- every setting.
 app = {
   name = "sqterm",
   package = "dev.squared.sqterm",
@@ -13,4 +22,9 @@ app = {
   -- zstd's decoder, for the packages (12.5).
   flags = {"-Isq_app/third_party/zstd"},
 }
-include("sq/build/template.lua")
+local built = include("sq/build/template.lua")
+
+-- Run when asked, not by every build (a first one takes several minutes).
+action{name = "packages", desc = "the packages (packages/build.sh)", cmd = {"bash", "packages/build.sh"}}
+
+return built

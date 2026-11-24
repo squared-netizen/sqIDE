@@ -24,7 +24,7 @@ against). In squared, a *package* means only the framework, squared-core, and
 its add-on packages, `squared-`*name*. The `squared` sqterm package is how the
 framework reaches the phone; it is not itself a squared package.
 
-**Offline.** No build makes a network request: `make packages` and
+**Offline.** No build makes a network request: `sqmake packages` and
 `packages/build.sh` work from what is already on disk. The one step that
 downloads is `tools/fetch_packages.sh`, run on purpose: CI's packages, or the
 sources to build them here.
@@ -135,7 +135,7 @@ On the phone, in Termux, from sqterm's folder. Either CI's packages:
 ```sh
 pkg install curl                  # once
 tools/fetch_packages.sh           # the network step: CI's release for these recipes
-make dev                          # offline: the APK, with them
+sqmake --debug install            # offline: the APK, with them, installed
 ```
 
 or the sources, built here (a recipe changed here has no release until CI
@@ -144,8 +144,8 @@ builds it from `main`):
 ```sh
 pkg install curl xz-utils zstd    # once
 tools/fetch_packages.sh --sources # the network step: the recipes' sources
-make packages                     # offline; or: bash packages/build.sh [name...]
-make dev
+sqmake packages                   # offline; or: bash packages/build.sh [name...]
+sqmake --debug install
 ```
 
 **One key a package.** `bash packages/build.sh --keys` prints each package's

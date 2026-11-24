@@ -30,7 +30,7 @@ BSD one).
 
 ## The prefix's packages
 
-The packages `make packages` builds (`packages/`), which the APK carries and
+The packages `sqmake packages` builds (`packages/`), which the APK carries and
 unpacks into sqterm's prefix, are other projects' software: ncurses (an
 X11-style licence) and zsh (its own permissive licence). Each package carries
 its licence, installed under `$PREFIX/share/licenses/<name>/`. The recipes
