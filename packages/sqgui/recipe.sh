@@ -16,7 +16,7 @@ version=0.1.0
 license=MIT
 file=sqgui-$version.tar.gz
 url=https://github.com/squared-netizen/sqgui/archive/refs/tags/v$version.tar.gz
-sha256=SQGUI_SHA256
+sha256=392c6465b686d75bcb0be3db3e1b18a7d9f964fdbeb347790fda8ee561b643a4
 top=sqgui-$version
 # "SUB URL SHA256": sqmake, for the build machine.
 extra="
