@@ -98,6 +98,25 @@ constexpr std::size_t out_bytes = std::size_t{128} * 1024;
     return out;
 }
 
+/// `path` with its nearest existing folder resolved (realpath) and the rest
+/// as it is: a prefix not made yet (the first start, before anything is
+/// unpacked) or one another app's permissions hide still compares.
+[[nodiscard]] std::string canonical(std::string path) {
+    std::string rest;
+    while (!path.empty()) {
+        if (const std::string here = real(path); !here.empty()) {
+            return here + rest;
+        }
+        const std::size_t slash = path.rfind('/');
+        if (slash == std::string::npos) {
+            break;
+        }
+        rest = path.substr(slash) + rest;
+        path.erase(slash);
+    }
+    return rest;
+}
+
 [[nodiscard]] std::string relocate_target(std::string_view prefix) {
     std::string p(prefix);
     while (p.size() > 1 && p.back() == '/') {
@@ -106,17 +125,17 @@ constexpr std::size_t out_bytes = std::size_t{128} * 1024;
     if (p == built_prefix) {
         return {};
     }
-    const std::string here = real(p);
-    if (!here.empty() && here == real(built_prefix)) {
-        return {};  // sqterm's folder by another name
-    }
-    // /data/user/0/<app> is /data/data/<app> for the phone's owner: shorter.
+    // Android hands an app /data/user/0/<app>/files: the same folder as
+    // /data/data/<app>/files for the phone's owner, which is shorter.
     constexpr std::string_view user0 = "/data/user/0/";
     if (p.starts_with(user0)) {
         const std::string data = "/data/data/" + p.substr(user0.size());
-        if (!here.empty() && real(data) == here) {
+        if (canonical(data) == canonical(p)) {
             p = data;
         }
+    }
+    if (p == built_prefix || canonical(p) == canonical(built_prefix)) {
+        return {};  // sqterm's folder by another name
     }
     return p;
 }
