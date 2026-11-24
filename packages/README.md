@@ -63,7 +63,7 @@ sqmake/           sqmake 0.10.0 (MIT): the SDK's build system, build.lua in
                   Lua 5.4; finds the toolchain itself from squared's
                   build/toolchain.lua (sqmake toolchain); C++23 modules,
                   built as sqdrive is
-sqgui/            sqgui 0.2.0 (MIT): sqgui-gen, the layout compiler an app's
+sqgui/            sqgui 0.2.1 (MIT): sqgui-gen, the layout compiler an app's
                   build runs on names.json and layouts/ (once squared's
                   sqgen), and sqgui, the editor's viewer (sqgui view: the
                   layouts in the terminal); built with sqmake (0.10.0, built first for the
@@ -86,7 +86,7 @@ squared-pg/       sqpg 0.1.0-alpha.3 (MIT): the SDK's workspace generator
                   packages at the commits squared-pg pins (`extra` files);
                   in share/squared-pg, linked from bin (not in the APK: pkg
                   install squared-pg)
-square/           square 0.3.0 (MIT): the SDK's workspace manager (square
+square/           square 0.3.1 (MIT): the SDK's workspace manager (square
                   info, where, owner, verify, resources, show, call); C++23
                   modules with sqcart vendored, built as sqedit is (not in
                   the APK: pkg install square)

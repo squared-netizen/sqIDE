@@ -1,4 +1,4 @@
-# square 0.3.0: the squared SDK's workspace manager, MIT. The one tool that
+# square 0.3.1: the squared SDK's workspace manager, MIT. The one tool that
 # knows what a workspace is: square info, where, owner, verify, resources,
 # show, and square call (the SDK's tool protocol), on the workspaces sqpg
 # makes (pkg install squared-pg) and the cartridges it installs.
@@ -12,7 +12,7 @@
 # vendored in its repository. A git source: the tag's commit is in
 # sources.lock.
 
-version=0.3.0
+version=0.3.1
 license=MIT
 git=https://github.com/squared-netizen/square
 tag=v$version
