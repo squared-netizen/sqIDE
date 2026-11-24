@@ -18,9 +18,9 @@
 # package code only (git archive of a commit), stops if squared/ differs from
 # the commit it came from (SQUARED_REV; --force overrides, with a backup), and
 # writes only the files that changed, keeping the framework's build output
-# (every directory under squared/build/). It also updates
-# mk/pkg_squared_core.mk, which the package owns, and SQUARED_REV. Commit all
-# three.
+# (every directory under squared/build/). It also updates SQUARED_REV, and
+# mk/pkg_squared_core.mk from a package commit that still has it (before
+# squared #39; sqterm owns its copy since). Commit them together.
 #
 # Runs from anywhere: the repo is found from this script's own path.
 set -euo pipefail
@@ -144,7 +144,12 @@ if [ -d "$here/squared" ]; then
 fi
 
 rm -rf "$TMP/x"; mkdir -p "$TMP/x"
-git -C "$PKG_REPO" archive --format=tar "$rev" "$TREE/squared" "$TREE/mk/pkg_squared_core.mk" | tar -x -C "$TMP/x"
+git -C "$PKG_REPO" archive --format=tar "$rev" "$TREE/squared" | tar -x -C "$TMP/x"
+# mk/pkg_squared_core.mk: in the package until squared #39 (its make files
+# went; sqterm's own Makefile keeps its copy until it builds with sqmake alone).
+if git -C "$PKG_REPO" cat-file -e "$rev:$TREE/mk/pkg_squared_core.mk" 2>/dev/null; then
+  git -C "$PKG_REPO" archive --format=tar "$rev" "$TREE/mk/pkg_squared_core.mk" | tar -x -C "$TMP/x"
+fi
 [ -f "$TMP/x/$TREE/squared/build/common.mk" ] || die "package commit $short has no squared/build/common.mk"
 
 current=$(read_rev "$here/SQUARED_REV")
@@ -161,7 +166,8 @@ else
   fi
 fi
 
-if ! cmp -s "$TMP/x/$TREE/mk/pkg_squared_core.mk" "$here/mk/pkg_squared_core.mk"; then
+if [ -f "$TMP/x/$TREE/mk/pkg_squared_core.mk" ] &&
+   ! cmp -s "$TMP/x/$TREE/mk/pkg_squared_core.mk" "$here/mk/pkg_squared_core.mk"; then
   echo "  mk/pkg_squared_core.mk <- package $short"
   if [ "$DRY" = 0 ]; then
     mkdir -p "$here/mk"
