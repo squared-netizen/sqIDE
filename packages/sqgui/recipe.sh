@@ -6,8 +6,9 @@
 #                  mk/pkg_squared_core.mk); once squared's sqgen, the same
 #                  output byte for byte
 #   bin/sqgui      the editor: list, show, get, check, map, names (words or
-#                  --json), view (the terminal face), and set, unset and undo,
-#                  which change one value and keep every other byte
+#                  --json), view (the terminal face), and set, unset, insert,
+#                  remove, move and undo, which change one thing and keep
+#                  every other byte
 #
 # Each one static program (libc++ linked in; only Android's libc, libm and
 # libdl at run time).
@@ -17,11 +18,11 @@
 # sysroot). sqmake 0.10.0 is built first for the build machine, from its tag's
 # archive (an `extra` file); sqgui from its tag's.
 
-version=0.3.0
+version=0.4.0
 license=MIT
 file=sqgui-$version.tar.gz
 url=https://github.com/squared-netizen/sqgui/archive/refs/tags/v$version.tar.gz
-sha256=60e67ecea262c3bc9341b73f79a8375cdeb3ba734033f29d3e7384e15d1f0b18
+sha256=ab1ac63aeb23f12812b72e084790dd9994d272ab28fe3591ea18cca739a41c55
 top=sqgui-$version
 # "SUB URL SHA256": sqmake, for the build machine.
 extra="
