@@ -1,22 +1,26 @@
-# sqgui: the squared SDK's UI editor, MIT. Its first part, sqgui-gen: an
-# app's sq_app/names.json and sq_app/layouts/*.json into C++ (names.hpp,
-# layouts.hpp, layouts.cpp), which an app's build runs (squared's
-# sq/build/template.lua and mk/pkg_squared_core.mk). It was squared's sqgen;
-# its output is the same, byte for byte. The editor comes in later versions.
+# sqgui: the squared SDK's UI editor, MIT.
 #
-#   bin/sqgui-gen  one static program (libc++ linked in; only Android's
-#                  libc, libm and libdl at run time)
+#   bin/sqgui-gen  an app's sq_app/names.json and sq_app/layouts/*.json into
+#                  C++ (names.hpp, layouts.hpp, layouts.cpp), which an app's
+#                  build runs (squared's sq/build/template.lua and
+#                  mk/pkg_squared_core.mk); once squared's sqgen, the same
+#                  output byte for byte
+#   bin/sqgui      the editor, phase 2: the viewer. list, show, get, check,
+#                  map, names (words or --json), and view, the terminal face
+#
+# Each one static program (libc++ linked in; only Android's libc, libm and
+# libdl at run time).
 #
 # Built with sqmake, as sqconsole is: sqgui's build.lua, against the squared
 # sqterm carries (SQUARED_REV) and the SDK's toolchain (SQ_SYSROOT names the
 # sysroot). sqmake 0.10.0 is built first for the build machine, from its tag's
 # archive (an `extra` file); sqgui from its tag's.
 
-version=0.1.0
+version=0.2.0
 license=MIT
 file=sqgui-$version.tar.gz
 url=https://github.com/squared-netizen/sqgui/archive/refs/tags/v$version.tar.gz
-sha256=392c6465b686d75bcb0be3db3e1b18a7d9f964fdbeb347790fda8ee561b643a4
+sha256=606c8e3a3fee2f00582d54d3b9883a37e46a05852ede6c21a237547f67152708
 top=sqgui-$version
 # "SUB URL SHA256": sqmake, for the build machine.
 extra="
@@ -26,7 +30,7 @@ depends="sysroot runtimes"
 # squared changes only by tools/vendor_framework.sh, which writes SQUARED_REV.
 inputs="SQUARED_REV squared/build/squared.lua squared/build/toolchain.lua"
 bundled=yes
-keep="bin/sqgui-gen share/licenses/sqgui"
+keep="bin/sqgui-gen bin/sqgui share/licenses/sqgui"
 
 recipe_build() {
   local bin=${LLVM_BIN:-/usr/lib/llvm-23/bin}
@@ -48,11 +52,14 @@ recipe_build() {
       SQUARED="$ROOT/squared" SQ_LLVM_BIN="$bin" SQ_SYSROOT="$sysroot" SQ_RUNTIMES="$rt" SQ_API="$SQ_API" \
       "$here/host/sqmake" -j"$JOBS" )
   mkdir -p "$dest$SQ_PREFIX/bin"
-  cp "$src/build/sqgui-gen" "$dest$SQ_PREFIX/bin/sqgui-gen"
-  # What it is: an arm64 Android program that needs no C++ library.
-  "$bin/llvm-readelf" -h "$dest$SQ_PREFIX/bin/sqgui-gen" | "$SQEDIT" match -q -F AArch64
-  "$bin/llvm-readelf" -l "$dest$SQ_PREFIX/bin/sqgui-gen" | "$SQEDIT" match -q -F /system/bin/linker64
-  ! "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/sqgui-gen" | "$SQEDIT" match -q '"NEEDED" (!"c++" .)* "c++"'
+  local program
+  for program in sqgui-gen sqgui; do
+    cp "$src/build/$program" "$dest$SQ_PREFIX/bin/$program"
+    # What it is: an arm64 Android program that needs no C++ library.
+    "$bin/llvm-readelf" -h "$dest$SQ_PREFIX/bin/$program" | "$SQEDIT" match -q -F AArch64
+    "$bin/llvm-readelf" -l "$dest$SQ_PREFIX/bin/$program" | "$SQEDIT" match -q -F /system/bin/linker64
+    ! "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/$program" | "$SQEDIT" match -q '"NEEDED" (!"c++" .)* "c++"'
+  done
 }
 
 recipe_after() {
