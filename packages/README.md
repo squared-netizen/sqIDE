@@ -63,11 +63,14 @@ sqmake/           sqmake 0.10.0 (MIT): the SDK's build system, build.lua in
                   Lua 5.4; finds the toolchain itself from squared's
                   build/toolchain.lua (sqmake toolchain); C++23 modules,
                   built as sqdrive is
-sqgen/            squared's layout compiler (MIT): names.json and layouts/
-                  into C++ for an app's build; built with sqmake (its own
-                  build, for the build machine, first) from squared/
+sqgui/            sqgui 0.1.0 (MIT): sqgui-gen, the layout compiler an app's
+                  build runs on names.json and layouts/ (once squared's
+                  sqgen); built with sqmake (0.10.0, built first for the
+                  build machine) against the squared sqterm carries
+sqgen/            sqgen 0.2.0: bin/sqgen, a link to sqgui-gen, for a
+                  workspace whose build still runs sqgen
 sqconsole/        squared's Console client (MIT): a debug build's Console in
-                  this terminal (sqmake console); built as sqgen is
+                  this terminal (sqmake console); built with sqmake from squared/
 squared/          the squared framework's sources (MIT), for every workspace to
                   build with: share/squared/VERSION/squared (sq/build/template.lua)
 sqterm-tools/     sqterm's own: the sqterm-* commands (sqterm-launch, ...),
