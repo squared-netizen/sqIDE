@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # tools/fetch_packages.sh: the one network step for sqterm's packages (12.5).
 # Run on purpose, when installing or after a recipe changes; no build calls
-# it. Everything after it (make packages, make apk) is offline.
+# it. Everything after it (sqmake packages, sqmake) is offline.
 #
 #   tools/fetch_packages.sh                    the packages CI built for these
 #                                              recipes, into
 #                                              sq_android/assets/packages/
 #   tools/fetch_packages.sh --sources [name...]  the recipes' sources, into
 #                                              build/packages/sources/, to
-#                                              build here: then make packages
+#                                              build here: then sqmake packages
 #   tools/fetch_packages.sh --get NAME...      packages, and what each needs at
 #                                              run time (packages/needs), into
 #                                              sqterm's packages folder
@@ -127,7 +127,7 @@ fetch_release() {
       rm -rf "$staging"
       fail "no $asset in the release: CI builds it when this recipe reaches main
           (github.com/$SQ_PACKAGES_REPO/actions). Or build here:
-          tools/fetch_packages.sh --sources; make packages"; }
+          tools/fetch_packages.sh --sources; sqmake packages"; }
     ( cd "$staging" && sha256sum -c --quiet "$asset.sha256" ) || fail "$asset does not match its .sha256"
   done
   mkdir -p "$OUT"
@@ -369,5 +369,5 @@ elif [ "$MODE" = get ]; then
 else
   [ ${#names[@]} -gt 0 ] || read -r -a names <<< "$(bash "$RECIPES/build.sh" --list | while read -r n _; do printf '%s ' "$n"; done)"
   for name in "${names[@]}"; do fetch_source "$name"; done
-  [ "$DRY" = 1 ] || say next "make packages (offline)"
+  [ "$DRY" = 1 ] || say next "sqmake packages (offline)"
 fi

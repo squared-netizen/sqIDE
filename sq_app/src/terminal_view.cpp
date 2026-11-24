@@ -124,10 +124,18 @@ constexpr sq::graphics::Color bar_text_color{
 
 // The theme's (theme.cpp): where a program chooses no colour, the cursor,
 // and the selection, laid over the text at a little over half strength.
-[[nodiscard]] sq::graphics::Color default_foreground() noexcept { return color_of(theme().foreground); }
-[[nodiscard]] sq::graphics::Color default_background() noexcept { return color_of(theme().background); }
-[[nodiscard]] sq::graphics::Color cursor_color() noexcept { return color_of(theme().cursor); }
-[[nodiscard]] sq::graphics::Color selection_color() noexcept { return color_of(theme().selection, 0.6F); }
+[[nodiscard]] sq::graphics::Color default_foreground() noexcept {
+    return color_of(theme().foreground);
+}
+[[nodiscard]] sq::graphics::Color default_background() noexcept {
+    return color_of(theme().background);
+}
+[[nodiscard]] sq::graphics::Color cursor_color() noexcept {
+    return color_of(theme().cursor);
+}
+[[nodiscard]] sq::graphics::Color selection_color() noexcept {
+    return color_of(theme().selection, 0.6F);
+}
 
 [[nodiscard]] sq::graphics::Color mix(sq::graphics::Color a, sq::graphics::Color b,
                                       float t) noexcept {
@@ -388,11 +396,21 @@ void TerminalView::paint(sq::gui::Painter& painter, const sq::gui::Skin& /*skin*
             const sq::graphics::TextureRegion region(texture, glyph->x, glyph->y, glyph->width,
                                                      glyph->height, false);
             const float x = x0 + (static_cast<float>(c) * cell_w_);
+            // A glyph wider than its cell (a Nerd Font icon: a whole em, the
+            // cell about 0.6 of one) is drawn smaller to fit it, about the
+            // same middle; the rest as they are.
+            const float fit =
+                static_cast<int>(glyph->advance) > static_cast<int>(metrics.cell_width)
+                    ? static_cast<float>(metrics.cell_width) / static_cast<float>(glyph->advance)
+                    : 1.0F;
+            const float height = static_cast<float>(glyph->height) * fit;
+            const float middle = static_cast<float>(metrics.ascender - glyph->top) +
+                                 (static_cast<float>(glyph->height) * 0.5F);
             const sq::gui::Rectangle at{
-                x + (static_cast<float>(glyph->left) / scale_),
-                y + (static_cast<float>(metrics.ascender - glyph->top) / scale_),
-                static_cast<float>(glyph->width) / scale_,
-                static_cast<float>(glyph->height) / scale_,
+                x + (static_cast<float>(glyph->left) * fit / scale_),
+                y + ((middle - (height * 0.5F)) / scale_),
+                static_cast<float>(glyph->width) * fit / scale_,
+                height / scale_,
             };
             painter.draw_region(region, at, colors_of(cell, is_cursor(c, r)).foreground);
         }
@@ -433,8 +451,8 @@ sq::gui::Rectangle TerminalView::drawer() const noexcept {
 
 sq::gui::Rectangle TerminalView::drawer_keyboard() const noexcept {
     const sq::gui::Rectangle pane = drawer();
-    return {drawer_margin_units, drawer_margin_units * 4.0F, pane.width - (drawer_margin_units * 2.0F),
-            button_height_units};
+    return {drawer_margin_units, drawer_margin_units * 4.0F,
+            pane.width - (drawer_margin_units * 2.0F), button_height_units};
 }
 
 void TerminalView::paint_drawer(sq::gui::Painter& painter, float x0, float y0) const {
