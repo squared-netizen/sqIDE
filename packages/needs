@@ -25,12 +25,14 @@ zsh-syntax-highlighting: zsh
 git: bash
 # The SDK's tools. sqmake builds with clang (llvm, which brings the sysroot
 # and the runtimes), and an app's build (sq/build/template.lua) runs sqedit
-# (the background service's manifest), apkpack (the APK) and sqgen (an app's
+# (the background service's manifest), apkpack (the APK) and sqgui-gen (an app's
 # names and layouts), and sqconsole (a debug build's Console). sqedit,
-# apkpack, sqgen, sqconsole and sqdrive are each one static
+# apkpack, sqgui, sqconsole and sqdrive are each one static
 # program: they need nothing.
-sqmake: llvm sqedit apkpack sqgen sqconsole
+sqmake: llvm sqedit apkpack sqgui sqconsole
 # sqpg makes a workspace for sqmake to build, with squared's framework;
 # square answers questions about it (its resources are squared-pg's).
 squared-pg: sqmake squared
 square: squared-pg
+# sqgen is the old name for sqgui-gen: a link to it.
+sqgen: sqgui

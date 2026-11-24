@@ -7,7 +7,7 @@
 #   bin/sqconsole  one static program (libc++ linked in; only Android's
 #                  libc, libm and libdl at run time)
 #
-# Built as sqgen is, with sqmake: squared's build/squared.lua (platform
+# Built with sqmake (as sqgen was): squared's build/squared.lua (platform
 # "host", the null graphics backend) and the SDK's toolchain, from the
 # squared sqterm carries (SQUARED_REV); sqmake v0.6.0 built first for the
 # build machine, from the source sources.lock records as sqconsole@.

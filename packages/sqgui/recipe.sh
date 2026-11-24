@@ -1,0 +1,65 @@
+# sqgui: the squared SDK's UI editor, MIT. Its first part, sqgui-gen: an
+# app's sq_app/names.json and sq_app/layouts/*.json into C++ (names.hpp,
+# layouts.hpp, layouts.cpp), which an app's build runs (squared's
+# sq/build/template.lua and mk/pkg_squared_core.mk). It was squared's sqgen;
+# its output is the same, byte for byte. The editor comes in later versions.
+#
+#   bin/sqgui-gen  one static program (libc++ linked in; only Android's
+#                  libc, libm and libdl at run time)
+#
+# Built with sqmake, as sqconsole is: sqgui's build.lua, against the squared
+# sqterm carries (SQUARED_REV) and the SDK's toolchain (SQ_SYSROOT names the
+# sysroot). sqmake 0.10.0 is built first for the build machine, from its tag's
+# archive (an `extra` file); sqgui from its tag's.
+
+version=0.1.0
+license=MIT
+file=sqgui-$version.tar.gz
+url=https://github.com/squared-netizen/sqgui/archive/refs/tags/v$version.tar.gz
+sha256=SQGUI_SHA256
+top=sqgui-$version
+# "SUB URL SHA256": sqmake, for the build machine.
+extra="
+sqmake https://github.com/squared-netizen/sqmake/archive/refs/tags/v0.10.0.tar.gz 9c18199c19bd47612034bacf76c37e0b22ac6905f1c27fa2674e5fe03c8f81af
+"
+depends="sysroot runtimes"
+# squared changes only by tools/vendor_framework.sh, which writes SQUARED_REV.
+inputs="SQUARED_REV squared/build/squared.lua squared/build/toolchain.lua"
+bundled=yes
+keep="bin/sqgui-gen share/licenses/sqgui"
+
+recipe_build() {
+  local bin=${LLVM_BIN:-/usr/lib/llvm-23/bin}
+  [ -x "$bin/clang++" ] || { echo "no clang 23 at $bin (set LLVM_BIN)" >&2; return 1; }
+  local here=${dest%/dest}
+  local sysroot=$here/../sysroot/dest$SQ_PREFIX/share/sysroot rt=$here/../runtimes/dest$SQ_PREFIX
+  [ -d "$sysroot/usr/include" ] || { echo "no sysroot at $sysroot (build sysroot first)" >&2; return 1; }
+  # 1. sqmake, for this machine: its own Makefile, with none of the Android
+  #    flags build.sh exports.
+  local sqmake_src=$here/sqmake
+  mkdir -p "$sqmake_src"
+  tar -xzf "$extra_sqmake" -C "$sqmake_src" --strip-components=1
+  env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS -u CC -u CXX make -C "$sqmake_src" -j"$JOBS" BUILD="$here/host" \
+    CXX="$bin/clang++" CC="$bin/clang" AR="$bin/llvm-ar" "$here/host/sqmake"
+  # 2. sqgui-gen, for Android: sqgui's build.lua in the unpacked source
+  #    (sqmake writes its build/ there), against sqterm's squared.
+  ( cd "$src" &&
+    env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS -u CXX -u CC \
+      SQUARED="$ROOT/squared" SQ_LLVM_BIN="$bin" SQ_SYSROOT="$sysroot" SQ_RUNTIMES="$rt" SQ_API="$SQ_API" \
+      "$here/host/sqmake" -j"$JOBS" )
+  mkdir -p "$dest$SQ_PREFIX/bin"
+  cp "$src/build/sqgui-gen" "$dest$SQ_PREFIX/bin/sqgui-gen"
+  # What it is: an arm64 Android program that needs no C++ library.
+  "$bin/llvm-readelf" -h "$dest$SQ_PREFIX/bin/sqgui-gen" | "$SQEDIT" match -q -F AArch64
+  "$bin/llvm-readelf" -l "$dest$SQ_PREFIX/bin/sqgui-gen" | "$SQEDIT" match -q -F /system/bin/linker64
+  ! "$bin/llvm-readelf" -d "$dest$SQ_PREFIX/bin/sqgui-gen" | "$SQEDIT" match -q '"NEEDED" (!"c++" .)* "c++"'
+}
+
+recipe_after() {
+  local to=share/licenses/sqgui
+  mkdir -p "$to"
+  cp "$src/LICENSE" "$to/LICENSE"
+  cp "$ROOT/squared/third_party/yyjson/LICENSE" "$to/yyjson.LICENSE"
+  # stb_image's, the end of its header.
+  tail -n 41 "$ROOT/squared/third_party/stb/stb_image.h" > "$to/stb_image.LICENSE"
+}
