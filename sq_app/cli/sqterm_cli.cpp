@@ -46,7 +46,7 @@ int usage() {
 
 std::string socket_path() {
     const char* prefix = std::getenv("PREFIX");
-    std::string p = prefix != nullptr && *prefix != '\0' ? prefix : "/data/data/dev.squared.sqide/files/usr";
+    std::string p = prefix != nullptr && *prefix != '\0' ? prefix : "/data/data/dev.squared.sqterm/files/usr";
     return p + "/var/run/sqterm.sock";
 }
 
