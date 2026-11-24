@@ -16,11 +16,11 @@
 # sysroot). sqmake 0.10.0 is built first for the build machine, from its tag's
 # archive (an `extra` file); sqgui from its tag's.
 
-version=0.2.0
+version=0.2.1
 license=MIT
 file=sqgui-$version.tar.gz
 url=https://github.com/squared-netizen/sqgui/archive/refs/tags/v$version.tar.gz
-sha256=606c8e3a3fee2f00582d54d3b9883a37e46a05852ede6c21a237547f67152708
+sha256=6c37807316d2a536e582d1912eaf2d90b20354441910b5d2a87355cf0e989f5b
 top=sqgui-$version
 # "SUB URL SHA256": sqmake, for the build machine.
 extra="
