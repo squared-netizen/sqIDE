@@ -9,7 +9,9 @@ around it (to come). App ID `dev.squared.sqide`, its own folder
 [sqterm](https://github.com/squared-netizen/sqterm) with its history; the
 terminal is changed there first and merged here (`git fetch upstream &&
 git merge upstream/main`). sqIDE's own work goes in new files, so those
-merges stay clean.
+merges stay clean. `packages/`, `sq_app/` and `squared/` stay as
+sqterm's: a package's key is a hash of its recipe's inputs, so a change there
+asks sqterm's release for an archive it does not have.
 
 **Packages come from sqterm.** sqterm's `packages` release is the one
 source (pkg and tools/fetch_packages.sh default to it); sqIDE builds none.
