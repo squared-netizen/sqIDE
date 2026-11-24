@@ -1,4 +1,5 @@
-# The APK, built with the SDK's own toolchain ("One C++23 toolchain",
+# sqIDE's APK (packages from sqterm's `packages` release, relocated to
+# sqIDE's folder as they are unpacked: sq_app/src/unpack.cpp), built with the SDK's own toolchain ("One C++23 toolchain",
 # phase 4): apt.llvm.org's clang 23 with sqterm's sysroot and runtimes
 # packages from the `packages` release, at the keys this checkout's recipes
 # give. The NDK is not used: ANDROID_NDK_HOME and the runner's NDKs are
@@ -82,8 +83,8 @@ jobs:
             version= key=
             while read -r n v k _; do if [ "$n" = "$name" ]; then version=$v key=$k; fi; done < keys.txt
             file=$name-$version-$key.tar.zst
-            gh release download packages -R "$GITHUB_REPOSITORY" -p "$file" -D "$RUNNER_TEMP/dl" ||
-              { echo "::error::$file is not in the release yet (the packages workflow publishes it from main)"; exit 1; }
+            gh release download packages -R squared-netizen/sqterm -p "$file" -D "$RUNNER_TEMP/dl" ||
+              { echo "::error::$file is not in the release yet (sqterm's packages workflow publishes it from its main)"; exit 1; }
             tar --zstd -xf "$RUNNER_TEMP/dl/$file" -C "$prefix"
           done
           {
@@ -194,14 +195,14 @@ jobs:
             echo "$got"
             [ "${got##* }" = "$want" ] ||
               { echo "::error::signed with ${got##* }, not the squared key $want (SIGNING.md)"; exit 1; }
-            apk=sqterm-$tag-$bundle-arm64-v8a.apk
+            apk=sqide-$tag-$bundle-arm64-v8a.apk
             cp build/sqterm.apk "$apk"
             sha256sum "$apk" > "$apk.sha256"
             files+=("$apk" "$apk.sha256")
             ls -l "$apk"
           done
           gh release create "$tag" "${files[@]}" --prerelease --target "$GITHUB_SHA" \
-            --title "sqterm $(date -u '+%Y-%m-%d %H:%M') UTC $tag (arm64-v8a, test)" \
+            --title "sqIDE $(date -u '+%Y-%m-%d %H:%M') UTC $tag (arm64-v8a, test)" \
             --notes "Test builds of $GITHUB_SHA for arm64-v8a, API 28 and later. basic: zsh and pkg (pkg installs the rest). all: every package bundled. Signed with the squared key, certificate SHA-256 $want (SIGNING.md): apkpack verify prints it."
 
       # Only the current test release and the one before it are kept: the

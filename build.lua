@@ -5,7 +5,7 @@
 -- (template.android.cpp's, squared's to update) says every setting.
 app = {
   name = "sqterm",
-  package = "dev.squared.sqterm",
+  package = "dev.squared.sqide",
   background = true,
   -- pkg's, built by packages/pkg/recipe.sh with sqcart's reader; the app
   -- does not call it.

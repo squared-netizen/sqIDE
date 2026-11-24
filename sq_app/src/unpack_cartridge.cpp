@@ -84,7 +84,8 @@ bool write_all(int fd, std::span<const std::byte> bytes) {
 }
 
 /// One entry, into `full`, through a part file.
-std::optional<std::string> install_entry(const sq::cart::Archive& a, const sq::cart::Entry& e, const std::string& full) {
+std::optional<std::string> install_entry(const sq::cart::Archive& a, const sq::cart::Entry& e, const std::string& full,
+                                         const std::string& to) {
     if (!make_parents(full)) return os_error("cannot make the folders of", full);
     const std::string part = full + ".sqterm-part";
     const mode_t mode = (e.flags & sq::cart::flag::x) ? 0755 : 0644;
@@ -109,6 +110,14 @@ std::optional<std::string> install_entry(const sq::cart::Archive& a, const sq::c
     }
     ::fchmod(fd, mode);  // as asked, whatever the umask
     if (::close(fd) != 0) return os_error("cannot write", part);
+    // Another app's folder (sqIDE's): sqterm's, in what the file keeps, made its.
+    if (!to.empty()) {
+        std::array<char, 512> why{};
+        if (sqterm::relocate_file(part.c_str(), to.c_str(), why.data(), why.size()) != 0) {
+            ::unlink(part.c_str());
+            return std::string(why.data());
+        }
+    }
     if (::rename(part.c_str(), full.c_str()) != 0) {
         const std::string why = os_error("cannot put in place", full);
         ::unlink(part.c_str());
@@ -137,10 +146,14 @@ std::optional<std::string> unpack(const char* archive, const char* prefix, const
         }
     }
     const std::string root(prefix);
+    std::array<char, 4096> relocated{};
+    const std::string to = sqterm::relocation_of(prefix, relocated.data(), relocated.size()) != 0
+                               ? std::string(relocated.data())
+                               : std::string();
     for (const sq::cart::Entry& e : *live) {
         if (e.path.starts_with("SQ-INF/")) continue;
         if (!plain_path(e.path)) return std::format("a file outside the prefix: {}", e.path);
-        if (auto why = install_entry(*a, e, root + "/" + e.path)) return why;
+        if (auto why = install_entry(*a, e, root + "/" + e.path, to)) return why;
     }
     if (links) {
         for (const auto& [path, target] : *links->object_if()) {

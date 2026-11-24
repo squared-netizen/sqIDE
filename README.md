@@ -1,4 +1,26 @@
-# sqterm
+# sqIDE
+
+The squared SDK's IDE for Android: sqterm's terminal as its backbone, with
+a workspace landing screen, a settings screen and sqgui's layout editor
+around it (to come). App ID `dev.squared.sqide`, its own folder
+(`/data/data/dev.squared.sqide/files/usr`), installed beside sqterm.
+
+**Built from sqterm.** This repository is a copy of
+[sqterm](https://github.com/squared-netizen/sqterm) with its history; the
+terminal is changed there first and merged here (`git fetch upstream &&
+git merge upstream/main`). sqIDE's own work goes in new files, so those
+merges stay clean.
+
+**Packages come from sqterm.** sqterm's `packages` release is the one
+source (pkg and tools/fetch_packages.sh default to it); sqIDE builds none.
+Packages are built for sqterm's folder, and the unpacker rewrites that
+folder to sqIDE's in each file as it lands (sq_app/src/unpack.cpp).
+
+What follows is sqterm's README, as it was copied.
+
+---
+
+## sqterm
 
 A terminal for Android, written as a [squared](https://github.com/squared-netizen/squared)
 app: a shell in a pseudo-terminal, drawn by squared, with no Java of its own.

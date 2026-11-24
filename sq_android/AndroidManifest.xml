@@ -26,7 +26,7 @@
   (sq_android/README.md).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-          package="dev.squared.sqterm"
+          package="dev.squared.sqide"
           android:versionCode="1"
           android:versionName="0.1.0">
 
