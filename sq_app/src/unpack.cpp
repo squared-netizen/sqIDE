@@ -98,14 +98,26 @@ constexpr std::size_t out_bytes = std::size_t{128} * 1024;
     return out;
 }
 
-/// `path` with its nearest existing folder resolved (realpath) and the rest
-/// as it is: a prefix not made yet (the first start, before anything is
-/// unpacked) or one another app's permissions hide still compares.
-[[nodiscard]] std::string canonical(std::string path) {
+/// Which folder a path names: its nearest existing folder's device and
+/// inode, and the rest of the path below that as it is. A prefix not made
+/// yet (the first start) compares too; and two names of one folder compare
+/// equal whether one is a symbolic link to the other or both are mounts of
+/// it (Android 11's app data isolation mounts /data/user/0/<app> and
+/// /data/data/<app> each on its own: realpath tells them apart, stat does not).
+struct Place {
+    bool found = false;
+    dev_t device = 0;
+    ino_t inode = 0;
+    std::string rest;
+    [[nodiscard]] bool operator==(const Place&) const = default;
+};
+
+[[nodiscard]] Place place_of(std::string path) {
     std::string rest;
     while (!path.empty()) {
-        if (const std::string here = real(path); !here.empty()) {
-            return here + rest;
+        struct stat st{};
+        if (::stat(path.c_str(), &st) == 0) {
+            return {.found = true, .device = st.st_dev, .inode = st.st_ino, .rest = rest};
         }
         const std::size_t slash = path.rfind('/');
         if (slash == std::string::npos) {
@@ -114,7 +126,12 @@ constexpr std::size_t out_bytes = std::size_t{128} * 1024;
         rest = path.substr(slash) + rest;
         path.erase(slash);
     }
-    return rest;
+    return {};
+}
+
+[[nodiscard]] bool same_place(const std::string& a, const std::string& b) {
+    const Place here = place_of(a);
+    return here.found && here == place_of(b);
 }
 
 [[nodiscard]] std::string relocate_target(std::string_view prefix) {
@@ -130,11 +147,11 @@ constexpr std::size_t out_bytes = std::size_t{128} * 1024;
     constexpr std::string_view user0 = "/data/user/0/";
     if (p.starts_with(user0)) {
         const std::string data = "/data/data/" + p.substr(user0.size());
-        if (canonical(data) == canonical(p)) {
+        if (same_place(data, p)) {
             p = data;
         }
     }
-    if (p == built_prefix || canonical(p) == canonical(built_prefix)) {
+    if (p == built_prefix || same_place(p, built_prefix)) {
         return {};  // sqterm's folder by another name
     }
     return p;
