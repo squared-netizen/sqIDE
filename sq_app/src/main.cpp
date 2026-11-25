@@ -1,19 +1,26 @@
-// sqterm: the app. A terminal for Android, on squared (Sprint 12).
+// sqIDE: the app. The squared SDK's IDE for the phone, with sqterm's terminal
+// as its backbone (docs/design.md).
 //
-// This file is YOURS (ownership class: seeded, sqterm's own).
+// This file is sqIDE's own: sqterm's main.cpp is replaced here, not merged
+// (an upstream change to it is carried over by hand). Everything else
+// sqterm's is used as it is.
 //
-// squared_main runs once, when the first window is up. It starts the Shell
-// (the model: the shell in a pty, on its own thread), names the terminal
-// widget as a custom node, gives the Stage the glyphs' surface hook (their
-// texture comes back after Android takes the surface away), and shows the
-// one screen. The shell's home is the app's private files: files/home.
-// Its programs are in sqterm's prefix, files/usr (12.5): the packages the APK
-// carries are copied out here when the prefix does not have them yet, and
-// the Shell unpacks them before it starts zsh.
-// It also keeps the App, for quit_app (Enter after the shell has ended), and
-// keeps sqterm running in the background while the shell runs (12.6): the
-// notification Termux has, with Exit and the wake lock (BACKGROUND=1).
+// squared_main runs once, when the first window is up:
+//
+//   - the model: one, made of parts (sq::messaging::Composite, squared
+//     1.2.0): sqterm's Shell (the shell in a pty), and sqIDE's Workspaces
+//     (square's answer to find, for the cards), each on the model's thread;
+//   - the screens: Workspaces, the root (the cards; a tap opens one in the
+//     terminal), and sqterm's terminal, pushed over it;
+//   - the drawer (the terminal's): sqIDE's name, and Workspaces, which goes
+//     back to the cards;
+//   - the background notice, as sqterm's: the shell keeps running.
+//
+// The prefix is sqterm's way, in sqIDE's own folder: the APK's packages are
+// unpacked into it at the first start, relocated from sqterm's folder as they
+// land (sq_app/src/unpack.cpp).
 
+#include "ide/workspaces.hpp"
 #include "sqterm.hpp"
 
 namespace sqterm {
@@ -21,8 +28,7 @@ namespace sqterm {
 namespace {
 
 /// The app's name: what the terminal, the notification and the drawer say.
-/// An app built on sqterm (sqIDE) has its own main.cpp, with its own name.
-constexpr std::string_view app_name = "sqterm";
+constexpr std::string_view app_name = "sqIDE";
 
 /// The one App of the process, named by squared_main (UI thread only).
 sq::App* the_app = nullptr;
@@ -45,6 +51,13 @@ std::unique_ptr<sq::gui::Widget> make_terminal(sq::Stage& stage) {
 
 }  // namespace sqterm
 
+namespace {
+
+/// sqIDE's model: the shell, and what knows the workspaces.
+using Model = sq::messaging::Composite<sqterm::Shell, sqide::Workspaces>;
+
+}  // namespace
+
 void squared_main(sq::App& app) {
     sqterm::the_app = &app;
     sqterm::Places places;
@@ -58,10 +71,18 @@ void squared_main(sq::App& app) {
         places.prefix = files->resolve_platform_path(FileType::Local, "usr");
         sqterm::stage_packages(*files, places);
     }
-    app.run<sqterm::Shell>(std::move(places));
+    sqterm::Places for_workspaces = places;
+    for_workspaces.staged.clear();  // the Shell unpacks them; the cards need only where
+    app.run<Model>(std::move(places), std::move(for_workspaces));
     static_cast<void>(app.keep_running({.title = sqterm::app_name, .text = "1 session"}));
-    app.stage.add<sqterm::Screen>();  // by its name: so Android can keep it
+
+    sqterm::set_drawer({.title = std::string(sqterm::app_name),
+                        .buttons = {{.label = "Workspaces", .tap = &sqide::open_workspaces}}});
+    // By their names: so Android can keep them.
+    app.stage.add<sqide::WorkspacesScreen>();
+    app.stage.add<sqterm::Screen>();
     app.stage.custom("terminal_view", &sqterm::make_terminal);
+    app.stage.custom("workspaces_view", &sqide::make_workspaces);
     app.stage.on_surface(&sqterm::Glyphs::restore, &sqterm::glyphs());
-    app.stage.push<sqterm::Screen>();
+    app.stage.push<sqide::WorkspacesScreen>();
 }
