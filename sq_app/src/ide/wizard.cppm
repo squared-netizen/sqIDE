@@ -40,10 +40,15 @@ public:
     void paint(sq::gui::Painter& painter, const sq::gui::Skin& skin, float stage_x,
                float stage_y) const override;
     bool pointer_event(const sq::gui::PointerEvent& event) override;
+    /// Two fingers tapped: the keyboard (the drawers' Keyboard button too).
+    bool pinch(const sq::gui::PinchEvent& event) override { return drawers_.pinch(event); }
     bool key_down(sq::app::Key key, sq::app::KeyModifiers modifiers) override;
     bool text_input(std::string_view text) override;
-    /// Focusable, for the keys; the keyboard comes with a tap on a field.
+    /// Focusable and taking text (or the Ui shows no keyboard for it); the
+    /// keyboard comes with a tap on a field, not with focus.
     [[nodiscard]] bool focusable() const noexcept override { return true; }
+    [[nodiscard]] bool wants_text_input() const noexcept override { return true; }
+    [[nodiscard]] bool keyboard_on_focus() const noexcept override { return false; }
 
 private:
     enum class Step : std::uint8_t { pick, form, creating };

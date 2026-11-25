@@ -54,7 +54,7 @@ std::string fit(sq::gui::Painter& painter, std::string text, float width) {
 
 }  // namespace
 
-HomeView::HomeView(sq::Stage& stage) noexcept : stage_(stage) {
+HomeView::HomeView(sq::Stage& stage) noexcept : stage_(stage), drawers_(stage) {
     drawers_.set(screen_items(stage_),
                  {{"Stop", [this] { static_cast<void>(stage_.telegraph().do_(addresses::stop)); }},
                   {"Terminal here",
