@@ -90,6 +90,9 @@ struct Drawer {
 void set_drawer(Drawer drawer);
 
 struct Places {
+    /// The app's name, as the terminal says it ("[sqterm: unpacking zsh]"):
+    /// another app built on sqterm (sqIDE) gives its own.
+    std::string name = "sqterm";
     std::string home;    ///< $HOME and where the shell starts
     std::string tmp;     ///< $TMPDIR: the prefix's tmp/
     std::string prefix;  ///< $PREFIX: files/usr, the packages' (12.5)

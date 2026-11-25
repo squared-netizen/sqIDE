@@ -342,8 +342,8 @@ void TerminalView::paint(sq::gui::Painter& painter, const sq::gui::Skin& /*skin*
                          float stage_y) const {
     painter.fill_rectangle({stage_x, stage_y, width(), height()}, default_background());
     if (glyphs_.failed()) {
-        painter.draw_text("sqterm: the bundled font does not open (assets/fonts/)", stage_x + 8.0F,
-                          stage_y + 8.0F, default_foreground());
+        painter.draw_text(the_drawer().title + ": the bundled font does not open (assets/fonts/)",
+                          stage_x + 8.0F, stage_y + 8.0F, default_foreground());
         return;
     }
     if (!view_ || !glyphs_.ready() || scale_ <= 0.0F || !glyphs_.texture().has_content()) {
