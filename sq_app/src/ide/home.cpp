@@ -1,10 +1,12 @@
-// sqIDE: the open workspace's Home (home.hpp says what is here).
+// sqIDE: the open workspace's Home (home.cppm says what is here).
 //
 // This file is sqIDE's own (sqterm has none of it).
 
-#include "home.hpp"
+module;
 
-#include "workspaces.hpp"
+#include "../sqterm.hpp"
+
+module sqide;
 
 namespace sqide {
 

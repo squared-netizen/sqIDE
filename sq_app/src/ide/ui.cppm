@@ -11,11 +11,13 @@
 // sqterm's terminal keeps its own drawer, from the left (set_drawer gives it
 // the same screens); its keyboard button is the terminal's own.
 
-#pragma once
+module;
 
 #include "../sqterm.hpp"
 
-namespace sqide {
+export module sqide:ui;
+
+export namespace sqide {
 
 /// The colours: the theme's (cyberpunk dream), as the terminal draws them.
 namespace colour {

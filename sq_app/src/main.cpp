@@ -22,9 +22,9 @@
 // unpacked into it at the first start, relocated from sqterm's folder as they
 // land (sq_app/src/unpack.cpp).
 
-#include "ide/home.hpp"
-#include "ide/workspaces.hpp"
 #include "sqterm.hpp"
+
+import sqide;
 
 namespace sqterm {
 

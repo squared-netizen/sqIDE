@@ -1,13 +1,15 @@
-// sqIDE: the Workspaces screen (workspaces.hpp says what is here).
+// sqIDE: the Workspaces screen (workspaces.cppm says what is here).
 //
 // This file is sqIDE's own (sqterm has none of it).
 
-#include "workspaces.hpp"
+module;
 
 #include <stdio.h>  // popen, pclose
 #include <sys/wait.h>
 
-#include "home.hpp"
+#include "../sqterm.hpp"
+
+module sqide;
 
 namespace sqide {
 

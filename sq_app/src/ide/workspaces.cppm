@@ -18,11 +18,15 @@
 // square is run as a program from the prefix (it is a package); the design
 // links libsquare later, when sqIDE's build builds it.
 
-#pragma once
+module;
 
-#include "ui.hpp"
+#include "../sqterm.hpp"
 
-namespace sqide {
+export module sqide:workspaces;
+
+import :ui;
+
+export namespace sqide {
 
 namespace addresses {
 /// Ask square again: the cards, as they are now.

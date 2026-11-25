@@ -1,11 +1,12 @@
-// sqIDE: the navigation and the drawers (ui.hpp says what they are).
+// sqIDE: the navigation and the drawers (ui.cppm says what they are).
 //
 // This file is sqIDE's own (sqterm has none of it).
 
-#include "ui.hpp"
+module;
 
-#include "home.hpp"
-#include "workspaces.hpp"
+#include "../sqterm.hpp"
+
+module sqide;
 
 namespace sqide {
 

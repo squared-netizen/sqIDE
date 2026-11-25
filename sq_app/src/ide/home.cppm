@@ -4,11 +4,15 @@
 //
 // This file is sqIDE's own (sqterm has none of it).
 
-#pragma once
+module;
 
-#include "ui.hpp"
+#include "../sqterm.hpp"
 
-namespace sqide {
+export module sqide:home;
+
+import :ui;
+
+export namespace sqide {
 
 /// The open workspace, drawn from the model's ws.home. UI thread only.
 class HomeView final : public sq::gui::Widget {
