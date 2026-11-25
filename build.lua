@@ -24,6 +24,8 @@ app = {
   -- The model's snapshots: the Shell's 2, Workspaces' 4 and the Runner's 1
   -- (sq_app/src/ide); squared's default is 4, and past it one is not published.
   shared = {"-DSQUARED_TELEGRAPH_SNAPSHOTS=12"},
+  -- The Settings screen (sq_app/src/settings.cpp, sqterm's).
+  libraries = {"settings"},
 }
 local built = include("sq/build/template.lua")
 
