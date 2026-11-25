@@ -1,36 +1,45 @@
 // sqIDE: the Workspaces screen (docs/design.md): every workspace under the
-// home folder, as cards, newest first; tap one to open it in the terminal.
+// home folder, as cards, newest first; tap one to open it.
 //
 // This file is sqIDE's own (sqterm has none of it).
 //
-//   Workspaces      the model's part: asks square (`square --json find
-//                   HOME`) at start and when asked again (ws.refresh), and
-//                   publishes its answer, as square wrote it, as ws.cards
-//   WorkspacesView  the widget: the cards, drawn; a tap opens one by typing
-//                   the command into the terminal (cd, or square explode for
-//                   a .sq), so the terminal shows what was done
-//   WorkspacesScreen  the screen: the widget, filling it
+//   Workspaces      the model's part: asks square for the cards (`square
+//                   --json find HOME`) at start and on ws.refresh, and opens
+//                   one on ws.open: a .sq is exploded first (`square explode`,
+//                   always: one is never worked on packed), then `square
+//                   info` says what it is. The cards as ws.cards, the open
+//                   one as ws.home, each with the commands it ran.
+//   WorkspacesView  the widget: the cards; a tap opens one and shows Home.
+//                   The left drawer moves between screens, the right one has
+//                   this screen's: New, Refresh.
+//   WorkspacesScreen  the screen: the root of sqIDE's stack.
 //
-// square is run as a program here, from the prefix (it is a package): the
-// design links libsquare later, when sqIDE's build builds it.
+// The terminal is not needed for any of it: the model runs square itself.
+// square is run as a program from the prefix (it is a package); the design
+// links libsquare later, when sqIDE's build builds it.
 
 #pragma once
 
-#include "../sqterm.hpp"
+#include "ui.hpp"
 
 namespace sqide {
 
 namespace addresses {
 /// Ask square again: the cards, as they are now.
 inline constexpr sq::messaging::Key<void, sq::messaging::do_> refresh{"ws.refresh"};
+/// Open the workspace at this path (a folder, or a .sq to explode first).
+inline constexpr sq::messaging::Key<std::string_view, sq::messaging::do_> open{"ws.open"};
 /// square's answer to `find` (its JSON, as written), or {"error": "..."}.
 inline constexpr sq::messaging::SnapshotKey cards{"ws.cards"};
+/// The open workspace: {"path", "info" (square info's), "ran": [commands]}, or
+/// {"error", "ran"}; {"opening": path} while it is being opened.
+inline constexpr sq::messaging::SnapshotKey home{"ws.home"};
 }  // namespace addresses
 
 /// The model's part that knows the workspaces (sq::messaging::Composite).
 class Workspaces final {
 public:
-    static constexpr std::array takes{addresses::refresh.name()};
+    static constexpr std::array takes{addresses::refresh.name(), addresses::open.name()};
 
     explicit Workspaces(sqterm::Places places);
 
@@ -39,6 +48,10 @@ public:
 
 private:
     void find(sq::messaging::Telegraph& t);
+    void open(sq::messaging::Telegraph& t, std::string path);
+    /// square, from the prefix, with `arguments` (each quoted): its exit
+    /// status and what it wrote (stderr too, so its error says why).
+    [[nodiscard]] std::pair<int, std::string> square(std::string_view arguments) const;
 
     sqterm::Places places_;
 };
@@ -64,34 +77,19 @@ private:
         std::string version;
         std::string template_id;
     };
-    /// What can be tapped: a button at the top, or a card.
-    struct Target {
-        enum class Kind : std::uint8_t {
-            none,
-            terminal,
-            make_new,
-            refresh,
-            card
-        } kind = Kind::none;
-        std::size_t card = 0;
-        friend bool operator==(const Target&, const Target&) = default;
-    };
 
     void read_cards(std::string_view json);
-    [[nodiscard]] sq::gui::Rectangle button(std::size_t i) const noexcept;
     [[nodiscard]] sq::gui::Rectangle card(std::size_t i) const noexcept;
-    [[nodiscard]] Target target_at(float x, float y) const noexcept;
-    void tap(Target target);
-    /// Type `text` into the shell and show the terminal.
-    void to_terminal(std::string_view text);
+    [[nodiscard]] std::optional<std::size_t> card_at(float x, float y) const noexcept;
 
     sq::Stage& stage_;
+    Drawers drawers_;
     std::uint64_t sequence_ = 0;
     bool have_cards_ = false;
     std::vector<Card> cards_;
     std::string message_;  ///< square's error, or "no workspaces"
     float scroll_ = 0.0F;
-    Target pressed_;
+    std::optional<std::size_t> pressed_;
     float press_y_ = 0.0F;
     float last_y_ = 0.0F;
     bool dragging_ = false;
@@ -106,7 +104,11 @@ struct WorkspacesScreen {
 /// The custom node's maker (Stage::custom).
 std::unique_ptr<sq::gui::Widget> make_workspaces(sq::Stage& stage);
 
-/// The drawer's Workspaces button: back to the cards.
-void open_workspaces(sq::Stage& stage);
+/// `s` in single quotes for the shell, each ' as '\''.
+[[nodiscard]] std::string shell_quoted(std::string_view s);
+/// `s` as a JSON string, quotes and all.
+[[nodiscard]] std::string json_string(std::string_view s);
+/// A JSON value's text, or "" (missing, or not a string).
+[[nodiscard]] std::string text_of(const sq::data::JsonValue* value);
 
 }  // namespace sqide

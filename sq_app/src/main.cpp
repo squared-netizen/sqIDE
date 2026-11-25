@@ -9,17 +9,20 @@
 //
 //   - the model: one, made of parts (sq::messaging::Composite, squared
 //     1.2.0): sqterm's Shell (the shell in a pty), and sqIDE's Workspaces
-//     (square's answer to find, for the cards), each on the model's thread;
-//   - the screens: Workspaces, the root (the cards; a tap opens one in the
-//     terminal), and sqterm's terminal, pushed over it;
-//   - the drawer (the terminal's): sqIDE's name, and Workspaces, which goes
-//     back to the cards;
+//     (square's answers: the cards, and opening one), each on the model's thread;
+//   - the screens: Workspaces, the root (the cards; a tap has the model open
+//     one), the open workspace's Home over it, and sqterm's terminal over
+//     that, when asked for (the terminal is optional: nothing needs it);
+//   - the drawers: on sqIDE's own screens, the left one moves between screens
+//     and the right one has the screen's own (ide/ui.hpp); the terminal's
+//     drawer has the same screens;
 //   - the background notice, as sqterm's: the shell keeps running.
 //
 // The prefix is sqterm's way, in sqIDE's own folder: the APK's packages are
 // unpacked into it at the first start, relocated from sqterm's folder as they
 // land (sq_app/src/unpack.cpp).
 
+#include "ide/home.hpp"
 #include "ide/workspaces.hpp"
 #include "sqterm.hpp"
 
@@ -76,13 +79,14 @@ void squared_main(sq::App& app) {
     app.run<Model>(std::move(places), std::move(for_workspaces));
     static_cast<void>(app.keep_running({.title = sqterm::app_name, .text = "1 session"}));
 
-    sqterm::set_drawer({.title = std::string(sqterm::app_name),
-                        .buttons = {{.label = "Workspaces", .tap = &sqide::open_workspaces}}});
+    sqterm::set_drawer({.title = std::string(sqterm::app_name), .buttons = sqide::screens()});
     // By their names: so Android can keep them.
     app.stage.add<sqide::WorkspacesScreen>();
+    app.stage.add<sqide::HomeScreen>();
     app.stage.add<sqterm::Screen>();
     app.stage.custom("terminal_view", &sqterm::make_terminal);
     app.stage.custom("workspaces_view", &sqide::make_workspaces);
+    app.stage.custom("home_view", &sqide::make_home);
     app.stage.on_surface(&sqterm::Glyphs::restore, &sqterm::glyphs());
     app.stage.push<sqide::WorkspacesScreen>();
 }

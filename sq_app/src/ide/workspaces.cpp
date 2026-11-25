@@ -5,38 +5,44 @@
 #include "workspaces.hpp"
 
 #include <stdio.h>  // popen, pclose
+#include <sys/wait.h>
+
+#include "home.hpp"
 
 namespace sqide {
 
 namespace {
 
-// The theme's colours (cyberpunk dream), as the terminal draws them.
-constexpr sq::graphics::Color background{
-    .red = 0.043F, .green = 0.027F, .blue = 0.098F, .alpha = 1.0F};
-constexpr sq::graphics::Color card_color{
-    .red = 0.106F, .green = 0.063F, .blue = 0.208F, .alpha = 1.0F};
-constexpr sq::graphics::Color pressed_color{
-    .red = 0.18F, .green = 0.11F, .blue = 0.33F, .alpha = 1.0F};
-constexpr sq::graphics::Color text_color{.red = 0.90F, .green = 0.88F, .blue = 1.0F, .alpha = 1.0F};
-constexpr sq::graphics::Color dim_color{.red = 0.62F, .green = 0.58F, .blue = 0.78F, .alpha = 1.0F};
-constexpr sq::graphics::Color cyan{.red = 0.02F, .green = 0.85F, .blue = 0.91F, .alpha = 1.0F};
-constexpr sq::graphics::Color magenta{.red = 1.0F, .green = 0.16F, .blue = 0.43F, .alpha = 1.0F};
-
 constexpr float margin = 16.0F;
-constexpr float button_top = 52.0F;
-constexpr float button_height = 52.0F;
-constexpr float cards_top = button_top + button_height + margin;
+constexpr float cards_top = 56.0F;
 constexpr float card_height = 84.0F;
 constexpr float card_gap = 10.0F;
 /// A finger that moves this far is scrolling, not tapping.
 constexpr float drag_slop = 10.0F;
 
-[[nodiscard]] bool inside(const sq::gui::Rectangle& r, float x, float y) noexcept {
-    return r.width > 0.0F && x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
+}  // namespace
+
+std::string text_of(const sq::data::JsonValue* value) {
+    const std::string* s = value != nullptr ? value->string_if() : nullptr;
+    return s != nullptr ? *s : std::string();
 }
 
-/// `s` in single quotes for the shell, each ' as '\''.
-[[nodiscard]] std::string shell_quoted(std::string_view s) {
+std::string json_string(std::string_view s) {
+    std::string out = "\"";
+    for (const char c : s) {
+        if (c == '"' || c == '\\') {
+            out += '\\';
+            out += c;
+        } else if (static_cast<unsigned char>(c) < 0x20) {
+            out += std::format("\\u{:04x}", static_cast<unsigned>(c));
+        } else {
+            out += c;
+        }
+    }
+    return out + "\"";
+}
+
+std::string shell_quoted(std::string_view s) {
     std::string out = "'";
     for (const char c : s) {
         out += c == '\'' ? std::string("'\\''") : std::string(1, c);
@@ -44,9 +50,16 @@ constexpr float drag_slop = 10.0F;
     return out + "'";
 }
 
-[[nodiscard]] std::string text_of(const sq::data::JsonValue* value) {
-    const std::string* s = value != nullptr ? value->string_if() : nullptr;
-    return s != nullptr ? *s : std::string();
+namespace {
+
+void publish(sq::messaging::Telegraph& t, const sq::messaging::SnapshotKey& key,
+             std::string_view text) {
+    const std::span<std::byte> room = t.snapshot(key, text.size());
+    if (room.size() < text.size()) {
+        return;
+    }
+    std::memcpy(room.data(), text.data(), text.size());
+    static_cast<void>(t.publish(key, text.size()));
 }
 
 }  // namespace
@@ -60,41 +73,84 @@ void Workspaces::start(sq::messaging::Telegraph& t) {
 }
 
 void Workspaces::receive(sq::messaging::Telegraph& t, const sq::messaging::Received& received) {
-    if (received.telegram.address().name == addresses::refresh.name()) {
+    const sq::messaging::Name to = received.telegram.address().name;
+    if (to == addresses::refresh.name()) {
         find(t);
+    } else if (to == addresses::open.name()) {
+        open(t, std::string(reinterpret_cast<const char*>(received.data.data()),
+                            received.data.size()));
     }
 }
 
-void Workspaces::find(sq::messaging::Telegraph& t) {
-    // square from the prefix, as the shell would run it; its JSON as it is.
-    const std::string square = places_.prefix + "/bin/square";
+std::pair<int, std::string> Workspaces::square(std::string_view arguments) const {
     const std::string command =
-        shell_quoted(square) + " --json find " + shell_quoted(places_.home) + " 2>/dev/null";
+        shell_quoted(places_.prefix + "/bin/square") + " " + std::string(arguments) + " 2>&1";
     std::string out;
+    int status = -1;
     if (FILE* pipe = ::popen(command.c_str(), "r")) {
         std::array<char, 4096> buffer{};
         while (const std::size_t n = std::fread(buffer.data(), 1, buffer.size(), pipe)) {
             out.append(buffer.data(), n);
         }
-        if (::pclose(pipe) != 0) {
-            out.clear();
+        const int raw = ::pclose(pipe);
+        status = WIFEXITED(raw) ? WEXITSTATUS(raw) : -1;
+    }
+    return {status, out};
+}
+
+void Workspaces::find(sq::messaging::Telegraph& t) {
+    auto [status, out] = square("--json find " + shell_quoted(places_.home));
+    if (status != 0 || out.empty()) {
+        out =
+            "{\"error\": " +
+            json_string(status == 127 || out.empty() ? "square is not installed: pkg install square"
+                                                     : out) +
+            "}";
+    }
+    publish(t, addresses::cards, out);
+}
+
+void Workspaces::open(sq::messaging::Telegraph& t, std::string path) {
+    publish(t, addresses::home, "{\"opening\": " + json_string(path) + "}");
+    std::string ran = "[";
+    // A .sq is always exploded to work on: into home, beside the others.
+    if (path.ends_with(".sq")) {
+        const std::string args = "explode " + shell_quoted(path) + " " + shell_quoted(places_.home);
+        ran += json_string("square " + args);
+        const auto [status, out] = square("--json " + args);
+        const auto parsed = sq::data::parse_json(out);
+        const std::string exploded =
+            parsed ? text_of(parsed.value.find("workspace")) : std::string();
+        if (status != 0 || exploded.empty()) {
+            publish(t, addresses::home,
+                    "{\"error\": " + json_string(out) + ", \"ran\": " + ran + "]}");
+            find(t);
+            return;
         }
+        path = exploded;
+        ran += ", ";
     }
-    if (out.empty()) {
-        out = "{\"error\": \"square found nothing (is it installed? pkg install square)\"}";
+    const std::string args = "--workspace " + shell_quoted(path) + " info";
+    ran += json_string("square " + args) + "]";
+    const auto [status, out] = square("--json " + args);
+    if (status != 0) {
+        publish(t, addresses::home, "{\"error\": " + json_string(out) + ", \"ran\": " + ran + "}");
+    } else {
+        publish(
+            t, addresses::home,
+            "{\"path\": " + json_string(path) + ", \"info\": " + out + ", \"ran\": " + ran + "}");
     }
-    const std::span<std::byte> room = t.snapshot(addresses::cards, out.size());
-    if (room.size() < out.size()) {
-        return;
-    }
-    std::memcpy(room.data(), out.data(), out.size());
-    static_cast<void>(t.publish(addresses::cards, out.size()));
+    find(t);  // the cards: a .sq exploded is a folder now too
 }
 
 // ---- the widget ---------------------------------------------------------------------------------
 
 WorkspacesView::WorkspacesView(sq::Stage& stage) noexcept : stage_(stage) {
-    // Shown again (back from the terminal): the cards as they are now.
+    drawers_.set(
+        screen_items(stage_),
+        {{"New workspace", [this] { message_ = "New: the wizard comes next (sqpg new for now)"; }},
+         {"Refresh", [this] { static_cast<void>(stage_.telegraph().do_(addresses::refresh)); }}});
+    // Shown again (back from Home): the cards as they are now.
     static_cast<void>(stage_.telegraph().do_(addresses::refresh));
 }
 
@@ -137,13 +193,8 @@ void WorkspacesView::read_cards(std::string_view json) {
         }
     }
     if (cards_.empty()) {
-        message_ = "No workspaces yet: New makes one (sqpg new).";
+        message_ = "No workspaces yet. Swipe in from the right: New workspace.";
     }
-}
-
-sq::gui::Rectangle WorkspacesView::button(std::size_t i) const noexcept {
-    const float w = (width() - (margin * 4.0F)) / 3.0F;
-    return {margin + (static_cast<float>(i) * (w + margin)), button_top, w, button_height};
 }
 
 sq::gui::Rectangle WorkspacesView::card(std::size_t i) const noexcept {
@@ -151,46 +202,36 @@ sq::gui::Rectangle WorkspacesView::card(std::size_t i) const noexcept {
             width() - (margin * 2.0F), card_height};
 }
 
-WorkspacesView::Target WorkspacesView::target_at(float x, float y) const noexcept {
-    for (std::size_t i = 0; i < 3; ++i) {
-        if (inside(button(i), x, y)) {
-            return {.kind = i == 0   ? Target::Kind::terminal
-                            : i == 1 ? Target::Kind::make_new
-                                     : Target::Kind::refresh};
-        }
-    }
+std::optional<std::size_t> WorkspacesView::card_at(float x, float y) const noexcept {
     if (y < cards_top) {
-        return {};
+        return std::nullopt;
     }
     for (std::size_t i = 0; i < cards_.size(); ++i) {
         if (inside(card(i), x, y)) {
-            return {.kind = Target::Kind::card, .card = i};
+            return i;
         }
     }
-    return {};
+    return std::nullopt;
 }
 
 void WorkspacesView::paint(sq::gui::Painter& painter, const sq::gui::Skin& /*skin*/, float stage_x,
                            float stage_y) const {
-    painter.fill_rectangle({stage_x, stage_y, width(), height()}, background);
-    painter.draw_text("sqIDE  ·  Workspaces", stage_x + margin, stage_y + margin, cyan);
-
-    // The cards, scrolled, under the buttons.
+    painter.fill_rectangle({stage_x, stage_y, width(), height()}, colour::background);
     for (std::size_t i = 0; i < cards_.size(); ++i) {
         const sq::gui::Rectangle r = card(i);
         if (r.y + r.height < cards_top || r.y > height()) {
             continue;
         }
         const Card& c = cards_[i];
-        const bool held = pressed_.kind == Target::Kind::card && pressed_.card == i && !dragging_;
+        const bool held = pressed_ == i && !dragging_;
         painter.fill_rectangle({stage_x + r.x, stage_y + r.y, r.width, r.height},
-                               held ? pressed_color : card_color);
+                               held ? colour::pressed : colour::card);
         // A stripe: cyan for a folder, magenta for a .sq (exploded when opened).
         painter.fill_rectangle({stage_x + r.x, stage_y + r.y, 4.0F, r.height},
-                               c.form == "compressed" ? magenta : cyan);
+                               c.form == "compressed" ? colour::magenta : colour::cyan);
         const float x = stage_x + r.x + 14.0F;
         const float y = stage_y + r.y + 10.0F;
-        painter.draw_text(c.title.empty() ? c.id : c.title, x, y, text_color);
+        painter.draw_text(c.title.empty() ? c.id : c.title, x, y, colour::text);
         std::string second = c.id + "  " + c.version;
         if (!c.template_id.empty()) {
             second += "  ·  " + c.template_id;
@@ -198,35 +239,27 @@ void WorkspacesView::paint(sq::gui::Painter& painter, const sq::gui::Skin& /*ski
         if (c.form == "compressed") {
             second += "  ·  .sq";
         }
-        painter.draw_text(second, x, y + 24.0F, dim_color);
-        painter.draw_text(c.path, x, y + 48.0F, dim_color);
+        painter.draw_text(second, x, y + 24.0F, colour::dim);
+        painter.draw_text(c.path, x, y + 48.0F, colour::dim);
     }
     if (!message_.empty()) {
-        painter.draw_text(message_, stage_x + margin, stage_y + cards_top + margin, dim_color);
+        painter.draw_text(message_, stage_x + margin, stage_y + cards_top + margin, colour::dim);
     }
-
-    // The buttons over everything that scrolls under them.
-    painter.fill_rectangle({stage_x, stage_y, width(), cards_top - 4.0F}, background);
-    painter.draw_text("sqIDE  ·  Workspaces", stage_x + margin, stage_y + margin, cyan);
-    static constexpr std::array<std::string_view, 3> labels{"Terminal", "New", "Refresh"};
-    for (std::size_t i = 0; i < labels.size(); ++i) {
-        const sq::gui::Rectangle r = button(i);
-        const bool held = !dragging_ && pressed_.kind != Target::Kind::none &&
-                          pressed_.kind != Target::Kind::card &&
-                          static_cast<std::size_t>(pressed_.kind) - 1 == i;
-        painter.fill_rectangle({stage_x + r.x, stage_y + r.y, r.width, r.height},
-                               held ? pressed_color : card_color);
-        const sq::gui::Size size = painter.measure_text(labels[i]);
-        painter.draw_text(labels[i], stage_x + r.x + ((r.width - size.width) * 0.5F),
-                          stage_y + r.y + ((r.height - size.height) * 0.5F), text_color);
-    }
+    // The title over the cards that scroll under it.
+    painter.fill_rectangle({stage_x, stage_y, width(), cards_top - 4.0F}, colour::background);
+    painter.draw_text("Workspaces", stage_x + margin, stage_y + margin, colour::cyan);
+    drawers_.paint(painter, stage_x, stage_y, width(), height());
 }
 
 bool WorkspacesView::pointer_event(const sq::gui::PointerEvent& event) {
     using sq::gui::PointerAction;
+    if (drawers_.pointer(event, width(), height())) {
+        pressed_.reset();
+        return true;
+    }
     switch (event.action) {
         case PointerAction::down:
-            pressed_ = target_at(event.x, event.y);
+            pressed_ = card_at(event.x, event.y);
             press_y_ = last_y_ = event.y;
             dragging_ = false;
             return true;
@@ -243,56 +276,22 @@ bool WorkspacesView::pointer_event(const sq::gui::PointerEvent& event) {
             return true;
         }
         case PointerAction::up:
-            if (!dragging_ && pressed_.kind != Target::Kind::none &&
-                target_at(event.x, event.y) == pressed_) {
-                tap(pressed_);
+            if (!dragging_ && pressed_ && card_at(event.x, event.y) == pressed_) {
+                // The model opens it (exploding a .sq first); Home shows it.
+                static_cast<void>(stage_.telegraph().do_(addresses::open,
+                                                         std::string_view(cards_[*pressed_].path)));
+                set_workspace_open(true);
+                static_cast<void>(stage_.push<HomeScreen>());
             }
-            pressed_ = {};
+            pressed_.reset();
             dragging_ = false;
             return true;
         case PointerAction::cancel:
-            pressed_ = {};
+            pressed_.reset();
             dragging_ = false;
             return true;
     }
     return false;
-}
-
-void WorkspacesView::tap(Target target) {
-    switch (target.kind) {
-        case Target::Kind::terminal:
-            to_terminal({});
-            break;
-        case Target::Kind::make_new:
-            // Typed, not run: the terminal shows what it takes (sqpg asks the rest).
-            to_terminal("sqpg new ");
-            break;
-        case Target::Kind::refresh:
-            static_cast<void>(stage_.telegraph().do_(addresses::refresh));
-            break;
-        case Target::Kind::card: {
-            const Card& c = cards_[target.card];
-            if (c.form == "compressed") {
-                // Always exploded to work on (docs/design.md): beside home's others.
-                const std::size_t dot = c.id.rfind('.');
-                const std::string name = dot == std::string::npos ? c.id : c.id.substr(dot + 1);
-                to_terminal("square explode " + shell_quoted(c.path) + " ~ && cd ~/" +
-                            shell_quoted(name) + " && clear\r");
-            } else {
-                to_terminal("cd " + shell_quoted(c.path) + " && clear\r");
-            }
-            break;
-        }
-        case Target::Kind::none:
-            break;
-    }
-}
-
-void WorkspacesView::to_terminal(std::string_view text) {
-    if (!text.empty()) {
-        static_cast<void>(stage_.telegraph().do_(sqterm::addresses::input, text));
-    }
-    static_cast<void>(stage_.push<sqterm::Screen>());
 }
 
 // ---- the screen ---------------------------------------------------------------------------------
@@ -303,10 +302,6 @@ void WorkspacesScreen::build(sq::gui::LayoutWriter& root) {
 
 std::unique_ptr<sq::gui::Widget> make_workspaces(sq::Stage& stage) {
     return std::make_unique<WorkspacesView>(stage);
-}
-
-void open_workspaces(sq::Stage& stage) {
-    static_cast<void>(stage.back());
 }
 
 }  // namespace sqide
