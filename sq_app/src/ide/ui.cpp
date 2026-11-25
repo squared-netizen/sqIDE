@@ -75,14 +75,17 @@ void go_terminal(sq::Stage& stage) {
 }
 
 std::vector<sqterm::DrawerButton> screens() {
-    return {{.label = "Workspaces", .tap = &go_workspaces}, {.label = "Home", .tap = &go_home}};
+    return {{.label = "Workspaces", .tap = &go_workspaces},
+            {.label = "Home", .tap = &go_home},
+            {.label = "Settings", .tap = &sqterm::show_settings}};
 }
 
 std::vector<Item> screen_items(sq::Stage& stage) {
     // Home is there always; with no workspace open it shows the cards.
     return {{"Workspaces", [&stage] { go_workspaces(stage); }},
             {"Home", [&stage] { go_home(stage); }},
-            {"Terminal", [&stage] { go_terminal(stage); }}};
+            {"Terminal", [&stage] { go_terminal(stage); }},
+            {"Settings", [&stage] { sqterm::show_settings(stage); }}};
 }
 
 // ---- the drawers --------------------------------------------------------------------------------

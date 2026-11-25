@@ -83,6 +83,8 @@ void squared_main(sq::App& app) {
     app.run<Model>(std::move(places), std::move(for_workspaces), std::move(for_runner));
     static_cast<void>(app.keep_running({.title = sqterm::app_name, .text = "1 session"}));
 
+    // Settings (squared's screen, sqterm's settings.cpp): in every drawer's screens.
+    sqterm::start_settings(app.stage, "dev.squared.sqide");
     sqterm::set_drawer({.title = std::string(sqterm::app_name), .buttons = sqide::screens()});
     // By their names: so Android can keep them.
     app.stage.add<sqide::WorkspacesScreen>();
