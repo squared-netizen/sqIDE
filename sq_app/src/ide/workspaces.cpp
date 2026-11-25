@@ -81,12 +81,18 @@ void Workspaces::receive(sq::messaging::Telegraph& t, const sq::messaging::Recei
     } else if (to == addresses::open.name()) {
         open(t, std::string(reinterpret_cast<const char*>(received.data.data()),
                             received.data.size()));
+    } else if (to == addresses::templates.name()) {
+        templates(t);
+    } else if (to == addresses::create.name()) {
+        create(t, {reinterpret_cast<const char*>(received.data.data()), received.data.size()});
     }
 }
 
-std::pair<int, std::string> Workspaces::square(std::string_view arguments) const {
-    const std::string command =
-        shell_quoted(places_.prefix + "/bin/square") + " " + std::string(arguments) + " 2>&1";
+std::pair<int, std::string> Workspaces::run(std::string_view program, std::string_view arguments,
+                                            bool with_stderr) const {
+    const std::string command = shell_quoted(places_.prefix + "/bin/" + std::string(program)) +
+                                " " + std::string(arguments) +
+                                (with_stderr ? " 2>&1" : " 2>/dev/null");
     std::string out;
     int status = -1;
     if (FILE* pipe = ::popen(command.c_str(), "r")) {
@@ -145,12 +151,123 @@ void Workspaces::open(sq::messaging::Telegraph& t, std::string path) {
     find(t);  // the cards: a .sq exploded is a folder now too
 }
 
+void Workspaces::templates(sq::messaging::Telegraph& t) {
+    const auto [status, out] = run("sqpg", "list template --json", false);
+    const auto listed = sq::data::parse_json(out);
+    if (status != 0 || !listed || listed.value.array_if() == nullptr) {
+        publish(t, addresses::template_list,
+                "{\"error\": " +
+                    json_string(status == 127 || out.empty()
+                                    ? "sqpg is not installed: pkg install squared-pg"
+                                    : out) +
+                    "}");
+        return;
+    }
+    // Each with its parameters, which only `show` says.
+    std::string list = "{\"templates\": [";
+    bool first = true;
+    for (const auto& item : *listed.value.array_if()) {
+        const std::string id = text_of(item.find("id"));
+        if (id.empty()) {
+            continue;
+        }
+        const auto [shown, text] = run("sqpg", "show " + shell_quoted(id) + " --json", false);
+        if (shown != 0 || !sq::data::parse_json(text)) {
+            continue;
+        }
+        list += (first ? "" : ", ") + text;
+        first = false;
+    }
+    publish(t, addresses::template_list, list + "]}");
+}
+
+namespace {
+
+/// sqpg's error, said in a line: its message, and what it names.
+std::string sqpg_error(const sq::data::JsonValue& answer) {
+    const sq::data::JsonValue* error = answer.find("error");
+    if (error == nullptr) {
+        return "sqpg failed";
+    }
+    std::string said = text_of(error->find("message"));
+    if (const sq::data::JsonValue* d = error->find("diagnostics")) {
+        for (const char* list : {"missing", "invalid"}) {
+            const sq::data::JsonValue* names = d->find(list);
+            if (names == nullptr || names->array_if() == nullptr || names->array_if()->empty()) {
+                continue;
+            }
+            said += std::string(" (") + list + ":";
+            for (const auto& n : *names->array_if()) {
+                said += " " + text_of(&n);
+            }
+            said += ")";
+        }
+    }
+    return said;
+}
+
+}  // namespace
+
+void Workspaces::create(sq::messaging::Telegraph& t, std::string_view request) {
+    const auto parsed = sq::data::parse_json(request);
+    const std::string id = parsed ? text_of(parsed.value.find("template")) : std::string();
+    const std::string name = parsed ? text_of(parsed.value.find("name")) : std::string();
+    if (id.empty() || name.empty()) {
+        publish(t, addresses::created, R"({"error": "a template and a name, both", "ran": []})");
+        return;
+    }
+    publish(t, addresses::created, "{\"creating\": " + json_string(name) + "}");
+    std::string args = "new " + shell_quoted(name) + " --template " + shell_quoted(id) + " -o " +
+                       shell_quoted(places_.home + "/" + name);
+    if (const sq::data::JsonValue* params = parsed.value.find("params");
+        params != nullptr && params->object_if() != nullptr) {
+        for (const auto& [key, value] : *params->object_if()) {
+            if (const std::string v = text_of(&value); !v.empty()) {
+                args += " -p " + shell_quoted(key + "=" + v);
+            }
+        }
+    }
+    std::string ran = "[" + json_string("sqpg " + args);
+    auto [status, out] = run("sqpg", args + " --json", false);
+    auto answer = sq::data::parse_json(out);
+    // A template that needs a kit says which: made again with them.
+    if (status != 0 && answer) {
+        const sq::data::JsonValue* error = answer.value.find("error");
+        const sq::data::JsonValue* d = error != nullptr ? error->find("diagnostics") : nullptr;
+        const sq::data::JsonValue* kits = d != nullptr ? d->find("required_kits") : nullptr;
+        if (text_of(error != nullptr ? error->find("code") : nullptr) == "template.kit.required" &&
+            kits != nullptr && kits->array_if() != nullptr) {
+            for (const auto& k : *kits->array_if()) {
+                args += " -k " + shell_quoted(text_of(&k));
+            }
+            ran += ", " + json_string("sqpg " + args);
+            std::tie(status, out) = run("sqpg", args + " --json", false);
+            answer = sq::data::parse_json(out);
+        }
+    }
+    ran += "]";
+    const std::string workspace = answer ? text_of(answer.value.find("workspace")) : std::string();
+    if (status != 0 || workspace.empty()) {
+        const std::string why =
+            !answer ? (status == 127 || out.empty()
+                           ? std::string("sqpg is not installed: pkg install squared-pg")
+                           : out)
+                    : sqpg_error(answer.value);
+        publish(t, addresses::created,
+                "{\"error\": " + json_string(why) + ", \"ran\": " + ran + "}");
+        return;
+    }
+    publish(t, addresses::created,
+            "{\"workspace\": " + json_string(workspace) + ", \"ran\": " + ran + "}");
+    open(t, workspace);  // Home shows it, the cards have it
+}
+
 // ---- the widget ---------------------------------------------------------------------------------
 
 WorkspacesView::WorkspacesView(sq::Stage& stage) noexcept : stage_(stage) {
     drawers_.set(
         screen_items(stage_),
-        {{"New workspace", [this] { message_ = "New: the wizard comes next (sqpg new for now)"; }},
+        {{"New workspace", [this] { static_cast<void>(stage_.push<NewScreen>()); }},
          {"Refresh", [this] { static_cast<void>(stage_.telegraph().do_(addresses::refresh)); }}});
     // Shown again (back from Home): the cards as they are now.
     static_cast<void>(stage_.telegraph().do_(addresses::refresh));

@@ -8,14 +8,17 @@
 //                   one on ws.open: a .sq is exploded first (`square explode`,
 //                   always: one is never worked on packed), then `square
 //                   info` says what it is. The cards as ws.cards, the open
-//                   one as ws.home, each with the commands it ran.
+//                   one as ws.home, each with the commands it ran. For New:
+//                   the templates sqpg knows (ws.templates, each with its
+//                   parameters), and `sqpg new` (ws.create), which opens the
+//                   workspace it made.
 //   WorkspacesView  the widget: the cards; a tap opens one and shows Home.
 //                   The left drawer moves between screens, the right one has
 //                   this screen's: New, Refresh.
 //   WorkspacesScreen  the screen: the root of sqIDE's stack.
 //
-// The terminal is not needed for any of it: the model runs square itself.
-// square is run as a program from the prefix (it is a package); the design
+// The terminal is not needed for any of it: the model runs square and sqpg
+// itself, as programs from the prefix (they are packages); the design
 // links libsquare later, when sqIDE's build builds it.
 
 module;
@@ -38,12 +41,22 @@ inline constexpr sq::messaging::SnapshotKey cards{"ws.cards"};
 /// The open workspace: {"path", "info" (square info's), "ran": [commands]}, or
 /// {"error", "ran"}; {"opening": path} while it is being opened.
 inline constexpr sq::messaging::SnapshotKey home{"ws.home"};
+/// Ask sqpg for the templates, each with its parameters (`sqpg show`).
+inline constexpr sq::messaging::Key<void, sq::messaging::do_> templates{"ws.templates"};
+/// {"templates": [sqpg show's, ...]}, or {"error": "..."}.
+inline constexpr sq::messaging::SnapshotKey template_list{"ws.template_list"};
+/// Make a workspace: {"template": ID, "name": NAME, "params": {KEY: VALUE}}.
+inline constexpr sq::messaging::Key<std::string_view, sq::messaging::do_> create{"ws.create"};
+/// What became of it: {"workspace": path, "ran": [...]} (then ws.home has
+/// it, opened), or {"error": "...", "ran": [...]}; {"creating": NAME} first.
+inline constexpr sq::messaging::SnapshotKey created{"ws.created"};
 }  // namespace addresses
 
 /// The model's part that knows the workspaces (sq::messaging::Composite).
 class Workspaces final {
 public:
-    static constexpr std::array takes{addresses::refresh.name(), addresses::open.name()};
+    static constexpr std::array takes{addresses::refresh.name(), addresses::open.name(),
+                                      addresses::templates.name(), addresses::create.name()};
 
     explicit Workspaces(sqterm::Places places);
 
@@ -53,9 +66,17 @@ public:
 private:
     void find(sq::messaging::Telegraph& t);
     void open(sq::messaging::Telegraph& t, std::string path);
-    /// square, from the prefix, with `arguments` (each quoted): its exit
-    /// status and what it wrote (stderr too, so its error says why).
-    [[nodiscard]] std::pair<int, std::string> square(std::string_view arguments) const;
+    void templates(sq::messaging::Telegraph& t);
+    void create(sq::messaging::Telegraph& t, std::string_view request);
+    /// A program from the prefix's bin/ with `arguments` (each quoted): its
+    /// exit status and what it wrote: stderr too, so its error says why,
+    /// unless it answers in JSON on stdout alone (sqpg --json).
+    [[nodiscard]] std::pair<int, std::string> run(std::string_view program,
+                                                  std::string_view arguments,
+                                                  bool with_stderr = true) const;
+    [[nodiscard]] std::pair<int, std::string> square(std::string_view arguments) const {
+        return run("square", arguments);
+    }
 
     sqterm::Places places_;
 };

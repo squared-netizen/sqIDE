@@ -83,10 +83,12 @@ void squared_main(sq::App& app) {
     // By their names: so Android can keep them.
     app.stage.add<sqide::WorkspacesScreen>();
     app.stage.add<sqide::HomeScreen>();
+    app.stage.add<sqide::NewScreen>();
     app.stage.add<sqterm::Screen>();
     app.stage.custom("terminal_view", &sqterm::make_terminal);
     app.stage.custom("workspaces_view", &sqide::make_workspaces);
     app.stage.custom("home_view", &sqide::make_home);
+    app.stage.custom("new_view", &sqide::make_new);
     app.stage.on_surface(&sqterm::Glyphs::restore, &sqterm::glyphs());
     app.stage.push<sqide::WorkspacesScreen>();
 }
