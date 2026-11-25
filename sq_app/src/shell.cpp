@@ -65,8 +65,8 @@ void Shell::install(sq::messaging::Telegraph& t) {
     bool all = true;
     for (const Staged& package : places_.staged) {
         std::array<char, 128> line{};
-        int n = std::snprintf(line.data(), line.size(), "[sqterm: unpacking %s]\r\n",
-                              package.name.c_str());
+        int n = std::snprintf(line.data(), line.size(), "[%s: unpacking %s]\r\n",
+                              places_.name.c_str(), package.name.c_str());
         say({line.data(), static_cast<std::size_t>(n > 0 ? n : 0)});
         publish(t);  // shown as it goes: the first start takes a few seconds
         // package.name is "name version".
@@ -75,7 +75,7 @@ void Shell::install(sq::messaging::Telegraph& t) {
                            std::string_view(package.name).substr(0, package.name.find(' ')));
         if (!error.empty()) {
             // The whole message: a path cut at 100 characters misled (2026-11-17).
-            say("[sqterm: " + error + "]\r\n");
+            say("[" + places_.name + ": " + error + "]\r\n");
             all = false;
             break;
         }
@@ -83,7 +83,7 @@ void Shell::install(sq::messaging::Telegraph& t) {
     }
     // Recorded only when every one is in: the next start tries again otherwise.
     if (all && !record_installed(places_)) {
-        say("[sqterm: the packages are in, but could not be recorded]\r\n");
+        say("[" + places_.name + ": the packages are in, but could not be recorded]\r\n");
     }
     places_.staged.clear();
     places_.staged.shrink_to_fit();
@@ -137,9 +137,9 @@ void Shell::spawn(sq::messaging::Telegraph& t) {
     };
     if (const sq::term::PtyError error = pty_.spawn(config)) {
         std::array<char, 160> line{};
-        const int n = std::snprintf(line.data(), line.size(), "\r\n[sqterm: %.*s (errno %d)]\r\n",
-                                    static_cast<int>(error.what().size()), error.what().data(),
-                                    error.system_error);
+        const int n = std::snprintf(line.data(), line.size(), "\r\n[%s: %.*s (errno %d)]\r\n",
+                                    places_.name.c_str(), static_cast<int>(error.what().size()),
+                                    error.what().data(), error.system_error);
         say({line.data(), static_cast<std::size_t>(n > 0 ? n : 0)});
         say("[Process completed - press Enter]");
         complete(t);
@@ -147,7 +147,7 @@ void Shell::spawn(sq::messaging::Telegraph& t) {
         return;
     }
     if (!t.watch(pty_.fd())) {
-        say("\r\n[sqterm: cannot watch the shell]\r\n");
+        say("\r\n[" + places_.name + ": cannot watch the shell]\r\n");
     }
     publish(t);
 }
