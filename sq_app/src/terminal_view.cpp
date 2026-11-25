@@ -122,19 +122,38 @@ constexpr sq::graphics::Color bar_text_color{
             .alpha = alpha};
 }
 
-// The theme's (theme.cpp): where a program chooses no colour, the cursor,
+// The widget's copy of the theme (theme.cpp), UI thread only: read when
+// the widget is made and again when the Shell says it changed
+// (term.theme_generation). Where a program chooses no colour, the cursor,
 // and the selection, laid over the text at a little over half strength.
+Theme& ui_theme() noexcept {
+    static Theme one = read_theme("");
+    return one;
+}
 [[nodiscard]] sq::graphics::Color default_foreground() noexcept {
-    return color_of(theme().foreground);
+    return color_of(ui_theme().foreground);
 }
 [[nodiscard]] sq::graphics::Color default_background() noexcept {
-    return color_of(theme().background);
+    return color_of(ui_theme().background);
 }
 [[nodiscard]] sq::graphics::Color cursor_color() noexcept {
-    return color_of(theme().cursor);
+    return color_of(ui_theme().cursor);
 }
 [[nodiscard]] sq::graphics::Color selection_color() noexcept {
-    return color_of(theme().selection, 0.6F);
+    return color_of(ui_theme().selection, 0.6F);
+}
+
+/// The drawer's title and the app's buttons (set_drawer): UI thread only.
+Drawer& the_drawer() noexcept {
+    static Drawer one;
+    return one;
+}
+
+/// The home folder, whose .config/sqterm/theme.json the theme is read from.
+[[nodiscard]] std::string home_of(sq::Stage& stage) {
+    sq::files::FileSystem* files = stage.files();
+    return files != nullptr ? files->resolve_platform_path(sq::files::FileType::Local, "home")
+                            : std::string();
 }
 
 [[nodiscard]] sq::graphics::Color mix(sq::graphics::Color a, sq::graphics::Color b,
@@ -206,8 +225,14 @@ struct Colors {
 
 }  // namespace
 
+void set_drawer(Drawer drawer) {
+    the_drawer() = std::move(drawer);
+}
+
 TerminalView::TerminalView(sq::Stage& stage, Glyphs& glyphs) noexcept
     : stage_(stage), glyphs_(glyphs) {
+    ui_theme() = read_theme(home_of(stage_));
+    theme_generation_ = stage_.telegraph().value(addresses::theme_generation).value_or(0);
     // A text copied before this widget was made (a rotation makes it again)
     // is the clipboard's already.
     if (const auto copied = stage_.telegraph().snapshot(addresses::copied)) {
@@ -262,6 +287,13 @@ void TerminalView::fit() noexcept {
 void TerminalView::act(double delta_seconds) {
     sq::gui::Widget::act(delta_seconds);
     fit();
+    // The Shell read theme.json again (term.theme): this end reads its part too.
+    if (const std::int64_t generation =
+            stage_.telegraph().value(addresses::theme_generation).value_or(0);
+        generation != theme_generation_) {
+        theme_generation_ = generation;
+        ui_theme() = read_theme(home_of(stage_));
+    }
     if (const auto shot = stage_.telegraph().snapshot(addresses::screen)) {
         if (shot->sequence != sequence_ || !view_) {
             view_ = sq::term::ScreenView::read(shot->bytes);
@@ -310,8 +342,8 @@ void TerminalView::paint(sq::gui::Painter& painter, const sq::gui::Skin& /*skin*
                          float stage_y) const {
     painter.fill_rectangle({stage_x, stage_y, width(), height()}, default_background());
     if (glyphs_.failed()) {
-        painter.draw_text("sqterm: the bundled font does not open (assets/fonts/)", stage_x + 8.0F,
-                          stage_y + 8.0F, default_foreground());
+        painter.draw_text(the_drawer().title + ": the bundled font does not open (assets/fonts/)",
+                          stage_x + 8.0F, stage_y + 8.0F, default_foreground());
         return;
     }
     if (!view_ || !glyphs_.ready() || scale_ <= 0.0F || !glyphs_.texture().has_content()) {
@@ -449,10 +481,20 @@ sq::gui::Rectangle TerminalView::drawer() const noexcept {
     return {0.0F, 0.0F, std::min(width() * 0.75F, drawer_width_units), height()};
 }
 
-sq::gui::Rectangle TerminalView::drawer_keyboard() const noexcept {
+sq::gui::Rectangle TerminalView::drawer_button(std::size_t i) const noexcept {
     const sq::gui::Rectangle pane = drawer();
-    return {drawer_margin_units, drawer_margin_units * 4.0F,
+    const float step = button_height_units + drawer_margin_units;
+    return {drawer_margin_units, (drawer_margin_units * 4.0F) + (static_cast<float>(i) * step),
             pane.width - (drawer_margin_units * 2.0F), button_height_units};
+}
+
+std::optional<std::size_t> TerminalView::drawer_button_at(float x, float y) const noexcept {
+    for (std::size_t i = 0; i <= the_drawer().buttons.size(); ++i) {
+        if (inside(drawer_button(i), x, y)) {
+            return i;
+        }
+    }
+    return std::nullopt;
 }
 
 void TerminalView::paint_drawer(sq::gui::Painter& painter, float x0, float y0) const {
@@ -462,14 +504,19 @@ void TerminalView::paint_drawer(sq::gui::Painter& painter, float x0, float y0) c
     painter.fill_rectangle({x0, y0, width(), height()}, drawer_shade_color);
     const sq::gui::Rectangle pane = drawer();
     painter.fill_rectangle({x0 + pane.x, y0 + pane.y, pane.width, pane.height}, bar_color);
-    painter.draw_text("sqterm", x0 + drawer_margin_units, y0 + drawer_margin_units, bar_text_color);
-    const sq::gui::Rectangle button = drawer_keyboard();
-    const sq::gui::Rectangle at{x0 + button.x, y0 + button.y, button.width, button.height};
-    painter.fill_rectangle(at, drawer_button_ ? bar_pressed_color : drawer_button_color);
-    const std::string_view label = stage_.keyboard_shown() ? "Hide keyboard" : "Keyboard";
-    const sq::gui::Size size = painter.measure_text(label);
-    painter.draw_text(label, at.x + ((at.width - size.width) * 0.5F),
-                      at.y + ((at.height - size.height) * 0.5F), bar_text_color);
+    painter.draw_text(the_drawer().title, x0 + drawer_margin_units, y0 + drawer_margin_units,
+                      bar_text_color);
+    for (std::size_t i = 0; i <= the_drawer().buttons.size(); ++i) {
+        const sq::gui::Rectangle button = drawer_button(i);
+        const sq::gui::Rectangle at{x0 + button.x, y0 + button.y, button.width, button.height};
+        painter.fill_rectangle(at, drawer_held_ == i ? bar_pressed_color : drawer_button_color);
+        const std::string_view label =
+            i == 0 ? (stage_.keyboard_shown() ? "Hide keyboard" : "Keyboard")
+                   : std::string_view(the_drawer().buttons[i - 1].label);
+        const sq::gui::Size size = painter.measure_text(label);
+        painter.draw_text(label, at.x + ((at.width - size.width) * 0.5F),
+                          at.y + ((at.height - size.height) * 0.5F), bar_text_color);
+    }
 }
 
 bool TerminalView::drawer_pointer(const sq::gui::PointerEvent& event) noexcept {
@@ -480,29 +527,34 @@ bool TerminalView::drawer_pointer(const sq::gui::PointerEvent& event) noexcept {
                 drawer_press_ = true;
                 drawer_x_ = event.x;
                 drawer_y_ = event.y;
-                drawer_button_ = inside(drawer_keyboard(), event.x, event.y);
+                drawer_held_ = drawer_button_at(event.x, event.y);
                 break;
             case PointerAction::move:
                 if (drawer_press_ && event.x - drawer_x_ < -drawer_swipe_units) {
                     drawer_open_ = false;  // swiped back out
                     drawer_press_ = false;
-                    drawer_button_ = false;
-                } else if (drawer_button_ && !inside(drawer_keyboard(), event.x, event.y)) {
-                    drawer_button_ = false;
+                    drawer_held_.reset();
+                } else if (drawer_held_ && drawer_button_at(event.x, event.y) != drawer_held_) {
+                    drawer_held_.reset();
                 }
                 break;
             case PointerAction::up:
             case PointerAction::cancel:
                 if (drawer_press_ && event.action == PointerAction::up) {
-                    if (drawer_button_ && inside(drawer_keyboard(), event.x, event.y)) {
-                        stage_.toggle_keyboard();
+                    if (drawer_held_ && drawer_button_at(event.x, event.y) == drawer_held_) {
+                        const std::size_t i = *drawer_held_;
                         drawer_open_ = false;
+                        if (i == 0) {
+                            stage_.toggle_keyboard();
+                        } else if (const auto tap = the_drawer().buttons[i - 1].tap) {
+                            tap(stage_);
+                        }
                     } else if (!inside(drawer(), event.x, event.y)) {
                         drawer_open_ = false;  // a tap beside it puts it away
                     }
                 }
                 drawer_press_ = false;
-                drawer_button_ = false;
+                drawer_held_.reset();
                 break;
         }
         return true;

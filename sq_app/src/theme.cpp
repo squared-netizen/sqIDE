@@ -7,7 +7,9 @@
 //
 // The default is "cyberpunk dream": a deep violet-black, with neon magenta,
 // cyan, mint and acid yellow, and lavender text. Any of it can be changed
-// without a rebuild, in ~/.config/sqterm/theme.json, read when sqterm starts:
+// without a rebuild, in ~/.config/sqterm/theme.json, read when sqterm starts
+// and again when term.theme asks (each end reads its own copy: the Shell the
+// palette, the widget the rest, so no thread reads what another writes):
 //
 //   {
 //     "background": "#0b0719",
@@ -30,8 +32,8 @@ namespace sqterm {
 namespace {
 
 constexpr sq::term::Rgb hex(std::uint32_t v) noexcept {
-    return {static_cast<std::uint8_t>((v >> 16U) & 0xFFU), static_cast<std::uint8_t>((v >> 8U) & 0xFFU),
-            static_cast<std::uint8_t>(v & 0xFFU)};
+    return {static_cast<std::uint8_t>((v >> 16U) & 0xFFU),
+            static_cast<std::uint8_t>((v >> 8U) & 0xFFU), static_cast<std::uint8_t>(v & 0xFFU)};
 }
 
 /// "cyberpunk dream": neon on a deep violet-black.
@@ -61,11 +63,6 @@ constexpr Theme cyberpunk_dream{
     }},
 };
 
-Theme& current() {
-    static Theme one = cyberpunk_dream;
-    return one;
-}
-
 /// "#rrggbb" as a colour; nothing for anything else.
 [[nodiscard]] std::optional<sq::term::Rgb> colour_of(const sq::data::JsonValue* value) {
     const std::string* s = value != nullptr ? value->string_if() : nullptr;
@@ -78,30 +75,30 @@ Theme& current() {
 
 }  // namespace
 
-const Theme& theme() noexcept { return current(); }
-
-void load_theme(std::string_view home) {
+Theme read_theme(std::string_view home) {
+    Theme t = cyberpunk_dream;
     const std::string path = std::string(home) + "/.config/sqterm/theme.json";
     std::FILE* file = std::fopen(path.c_str(), "rb");
-    if (file == nullptr) return;  // none: the default
+    if (file == nullptr) return t;  // none: the default
     std::string text;
     std::array<char, 4096> buffer{};
-    while (const std::size_t n = std::fread(buffer.data(), 1, buffer.size(), file)) text.append(buffer.data(), n);
+    while (const std::size_t n = std::fread(buffer.data(), 1, buffer.size(), file))
+        text.append(buffer.data(), n);
     std::fclose(file);
     const auto parsed = sq::data::parse_json(text);
     if (!parsed || parsed.value.object_if() == nullptr) {
-        std::fprintf(stderr, "sqterm: %s is not a JSON object; the default theme stays\n", path.c_str());
-        return;
+        std::fprintf(stderr, "sqterm: %s is not a JSON object; the default theme stays\n",
+                     path.c_str());
+        return t;
     }
-    Theme& t = current();
     const auto set = [&](std::string_view key, sq::term::Rgb& into) {
         const sq::data::JsonValue* value = parsed.value.find(key);
         if (value == nullptr) return;
         if (const auto c = colour_of(value)) {
             into = *c;
         } else {
-            std::fprintf(stderr, "sqterm: %s: %.*s is not \"#rrggbb\"\n", path.c_str(), static_cast<int>(key.size()),
-                         key.data());
+            std::fprintf(stderr, "sqterm: %s: %.*s is not \"#rrggbb\"\n", path.c_str(),
+                         static_cast<int>(key.size()), key.data());
         }
     };
     set("foreground", t.foreground);
@@ -114,12 +111,14 @@ void load_theme(std::string_view home) {
                 if (const auto c = colour_of(&(*list)[i])) {
                     t.palette[i] = *c;
                 } else {
-                    std::fprintf(stderr, "sqterm: %s: palette[%zu] is not \"#rrggbb\"\n", path.c_str(), i);
+                    std::fprintf(stderr, "sqterm: %s: palette[%zu] is not \"#rrggbb\"\n",
+                                 path.c_str(), i);
                 }
             }
         }
     }
     t.name = "theme.json";
+    return t;
 }
 
 }  // namespace sqterm
