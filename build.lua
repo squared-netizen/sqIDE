@@ -21,6 +21,9 @@ app = {
   exclude = {"sq_app/src/unpack_cartridge.cpp"},
   -- zstd's decoder, for the packages (12.5).
   flags = {"-Isq_app/third_party/zstd"},
+  -- The model's snapshots: the Shell's 2, Workspaces' 4 and the Runner's 1
+  -- (sq_app/src/ide); squared's default is 4, and past it one is not published.
+  shared = {"-DSQUARED_TELEGRAPH_SNAPSHOTS=12"},
 }
 local built = include("sq/build/template.lua")
 
