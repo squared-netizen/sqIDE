@@ -34,6 +34,13 @@ inline constexpr sq::messaging::Key<std::string_view, sq::messaging::do_> input{
 inline constexpr sq::messaging::Key<std::array<float, 2>, sq::messaging::do_> size{"term.size"};
 /// How far back into the scrollback to show: lines, 0 for the screen.
 inline constexpr sq::messaging::Key<std::int64_t, sq::messaging::do_> scroll{"term.scroll"};
+/// Read ~/.config/sqterm/theme.json again (Settings changed it): the Shell
+/// takes its palette from it, and says so with theme_generation.
+inline constexpr sq::messaging::Key<void, sq::messaging::do_> theme{"term.theme"};
+/// How many times the theme has been read: the widget reads it again when
+/// this moves, on its own thread (each end keeps its own copy).
+inline constexpr sq::messaging::Key<std::int64_t, sq::messaging::state> theme_generation{
+    "term.theme_generation"};
 /// The screen, as sq::term::ScreenPublisher writes it.
 inline constexpr sq::messaging::SnapshotKey screen{"term.screen"};
 /// The shell has ended: Enter now closes sqterm.
@@ -63,10 +70,24 @@ struct Theme {
     sq::term::Rgb selection;
     sq::term::Palette palette;
 };
-/// The theme in use: "cyberpunk dream", or what ~/.config/sqterm/theme.json changed.
-[[nodiscard]] const Theme& theme() noexcept;
-/// Reads `home`/.config/sqterm/theme.json, if there is one, over the default.
-void load_theme(std::string_view home);
+/// "cyberpunk dream", with what `home`/.config/sqterm/theme.json changes, if
+/// there is one. Each end keeps its own (the Shell its palette, the widget
+/// the rest): read again when term.theme asks.
+[[nodiscard]] Theme read_theme(std::string_view home);
+
+/// A button in the terminal's drawer, after Keyboard: an app's own (sqIDE's
+/// Workspaces, Settings). Its tap runs on the UI thread, with the Stage.
+struct DrawerButton {
+    std::string label;
+    void (*tap)(sq::Stage& stage) = nullptr;
+};
+/// What the drawer shows: its title, and the app's buttons after Keyboard.
+/// sqterm's: "sqterm", none. Set in squared_main, before the widget is made.
+struct Drawer {
+    std::string title = "sqterm";
+    std::vector<DrawerButton> buttons;
+};
+void set_drawer(Drawer drawer);
 
 struct Places {
     std::string home;    ///< $HOME and where the shell starts
@@ -100,9 +121,16 @@ public:
     Shell(Shell&&) = delete;
     Shell& operator=(Shell&&) = delete;
 
+    /// The names it takes, as a part of a composite model (sq::messaging::Composite).
+    static constexpr std::array takes{addresses::input.name(), addresses::size.name(),
+                                      addresses::copy.name(), addresses::scroll.name(),
+                                      addresses::theme.name()};
+
     void start(sq::messaging::Telegraph& t);
     void receive(sq::messaging::Telegraph& t, const sq::messaging::Received& received);
     void readable(sq::messaging::Telegraph& t, int fd);
+    /// Whether `fd` is its shell's: a composite gives it only those.
+    [[nodiscard]] bool watches(int fd) const noexcept { return fd == pty_.fd(); }
 
 private:
     void install(sq::messaging::Telegraph& t);
@@ -114,6 +142,8 @@ private:
     void say(std::string_view text);
 
     Places places_;
+    Theme theme_;  ///< the model's copy: the palette (term.theme reads it again)
+    std::int64_t theme_generation_ = 0;
     std::array<std::string, 12> environment_text_;
     std::array<std::string_view, 12> environment_{};
     std::size_t environment_count_ = 0;
@@ -249,7 +279,10 @@ private:
 
     // The side pane, as Termux's drawer: swiped in from the left edge.
     [[nodiscard]] sq::gui::Rectangle drawer() const noexcept;
-    [[nodiscard]] sq::gui::Rectangle drawer_keyboard() const noexcept;
+    /// The drawer's button `i`: 0 is Keyboard, then the app's (set_drawer).
+    [[nodiscard]] sq::gui::Rectangle drawer_button(std::size_t i) const noexcept;
+    /// The button under (x, y), or nothing.
+    [[nodiscard]] std::optional<std::size_t> drawer_button_at(float x, float y) const noexcept;
     void paint_drawer(sq::gui::Painter& painter, float x0, float y0) const;
     /// A touch the drawer takes (open, or swiped in now): true when it did.
     bool drawer_pointer(const sq::gui::PointerEvent& event) noexcept;
@@ -286,8 +319,8 @@ private:
     int pinch_start_ = 100;    ///< the font's size, in percent, as a pinch began
     std::chrono::steady_clock::time_point pinch_began_{};  ///< for a two-finger tap
     bool pinch_moved_ = false;  ///< the fingers spread or closed: a pinch, not a tap
-    float scale_ = 0.0F;       ///< pixels to a logical unit, as the glyphs were made
-    float cell_w_ = 0.0F;      ///< a cell, in logical units
+    float scale_ = 0.0F;        ///< pixels to a logical unit, as the glyphs were made
+    float cell_w_ = 0.0F;       ///< a cell, in logical units
     float cell_h_ = 0.0F;
     std::uint16_t columns_ = 0;  ///< the grid asked of the Shell
     std::uint16_t rows_ = 0;
@@ -296,10 +329,11 @@ private:
     std::int64_t scrolled_ = 0;  ///< lines back, as asked
     bool dragging_ = false;
     bool drawer_open_ = false;
-    bool edge_press_ = false;     ///< down by the left edge: may swipe the drawer in
-    bool drawer_press_ = false;   ///< down while it is open
-    bool drawer_button_ = false;  ///< its Keyboard button held
-    float drawer_x_ = 0.0F;       ///< where that press went down
+    bool edge_press_ = false;                 ///< down by the left edge: may swipe the drawer in
+    bool drawer_press_ = false;               ///< down while it is open
+    std::optional<std::size_t> drawer_held_;  ///< the button held down
+    std::int64_t theme_generation_ = -1;      ///< the theme read: term.theme_generation's
+    float drawer_x_ = 0.0F;                   ///< where that press went down
     float drawer_y_ = 0.0F;
 };
 
