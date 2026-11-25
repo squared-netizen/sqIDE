@@ -40,7 +40,7 @@ std::string fit(sq::gui::Painter& painter, std::string text, float width) {
 
 }  // namespace
 
-NewView::NewView(sq::Stage& stage) noexcept : stage_(stage) {
+NewView::NewView(sq::Stage& stage) noexcept : stage_(stage), drawers_(stage) {
     drawers_.set(
         screen_items(stage_),
         {{"Templates", [this] { to(Step::pick); }},

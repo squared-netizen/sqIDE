@@ -304,7 +304,7 @@ void Workspaces::create(sq::messaging::Telegraph& t, std::string_view request) {
 
 // ---- the widget ---------------------------------------------------------------------------------
 
-WorkspacesView::WorkspacesView(sq::Stage& stage) noexcept : stage_(stage) {
+WorkspacesView::WorkspacesView(sq::Stage& stage) noexcept : stage_(stage), drawers_(stage) {
     drawers_.set(
         screen_items(stage_),
         {{"New workspace", [this] { static_cast<void>(stage_.push<NewScreen>()); }},

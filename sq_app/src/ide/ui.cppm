@@ -69,13 +69,22 @@ struct Item {
 
 /// The two drawers of a screen: painted over it, and taking the touches
 /// that open, use and close them. A widget owns one, and asks it first.
+///
+/// The left drawer ends, at its bottom left, with Keyboard (as Termux's
+/// does), on every screen; two fingers tapped anywhere do the same, as on
+/// the terminal. The widget that owns the drawers says it takes text
+/// (wants_text_input), or the keyboard is not shown for it.
 class Drawers {
 public:
+    explicit Drawers(sq::Stage& stage) noexcept : stage_(stage) {}
+
     /// The left drawer's items (the screens), and the right's (this screen's).
     void set(std::vector<Item> left, std::vector<Item> right);
 
     /// A touch the drawers take: true when they did (the widget ignores it).
     bool pointer(const sq::gui::PointerEvent& event, float width, float height);
+    /// Two fingers: tapped, the keyboard up or away. True when it was a tap.
+    bool pinch(const sq::gui::PinchEvent& event);
     void paint(sq::gui::Painter& painter, float x0, float y0, float width, float height) const;
     [[nodiscard]] bool open() const noexcept { return side_ != Side::none; }
 
@@ -85,13 +94,19 @@ private:
     [[nodiscard]] sq::gui::Rectangle item(Side side, std::size_t i, float width,
                                           float height) const noexcept;
     [[nodiscard]] const std::vector<Item>& items(Side side) const noexcept;
+    /// The left drawer's Keyboard button, at its bottom left.
+    [[nodiscard]] sq::gui::Rectangle keyboard(float width, float height) const noexcept;
 
+    sq::Stage& stage_;
     std::vector<Item> left_;
     std::vector<Item> right_;
     Side side_ = Side::none;
     Side edge_ = Side::none;  ///< a press by an edge: may swipe that drawer in
     float press_x_ = 0.0F;
     std::optional<std::size_t> held_;
+    bool held_keyboard_ = false;
+    std::chrono::steady_clock::time_point pinch_began_{};
+    bool pinch_moved_ = false;
 };
 
 }  // namespace sqide
