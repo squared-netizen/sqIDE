@@ -20,6 +20,10 @@ namespace sqterm {
 
 namespace {
 
+/// The app's name: what the terminal, the notification and the drawer say.
+/// An app built on sqterm (sqIDE) has its own main.cpp, with its own name.
+constexpr std::string_view app_name = "sqterm";
+
 /// The one App of the process, named by squared_main (UI thread only).
 sq::App* the_app = nullptr;
 
@@ -44,6 +48,7 @@ std::unique_ptr<sq::gui::Widget> make_terminal(sq::Stage& stage) {
 void squared_main(sq::App& app) {
     sqterm::the_app = &app;
     sqterm::Places places;
+    places.name = std::string(sqterm::app_name);
     if (sq::files::FileSystem* files = app.stage.files()) {
         using sq::files::FileType;
         static_cast<void>(files->make_directories(FileType::Local, "home"));
@@ -54,7 +59,7 @@ void squared_main(sq::App& app) {
         sqterm::stage_packages(*files, places);
     }
     app.run<sqterm::Shell>(std::move(places));
-    static_cast<void>(app.keep_running({.title = "sqterm", .text = "1 session"}));
+    static_cast<void>(app.keep_running({.title = sqterm::app_name, .text = "1 session"}));
     app.stage.add<sqterm::Screen>();  // by its name: so Android can keep it
     app.stage.custom("terminal_view", &sqterm::make_terminal);
     app.stage.on_surface(&sqterm::Glyphs::restore, &sqterm::glyphs());
