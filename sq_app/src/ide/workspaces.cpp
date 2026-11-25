@@ -90,9 +90,15 @@ void Workspaces::receive(sq::messaging::Telegraph& t, const sq::messaging::Recei
 
 std::pair<int, std::string> Workspaces::run(std::string_view program, std::string_view arguments,
                                             bool with_stderr) const {
-    const std::string command = shell_quoted(places_.prefix + "/bin/" + std::string(program)) +
-                                " " + std::string(arguments) +
-                                (with_stderr ? " 2>&1" : " 2>/dev/null");
+    // The environment the terminal's commands have (HOME for sqpg's own
+    // resources, PATH for what these run in turn), as NAME='value' words.
+    std::string command;
+    for (const std::string& e : environment(places_)) {
+        const std::size_t eq = e.find('=');
+        command += e.substr(0, eq + 1) + shell_quoted(e.substr(eq + 1)) + " ";
+    }
+    command += shell_quoted(places_.prefix + "/bin/" + std::string(program)) + " " +
+               std::string(arguments) + (with_stderr ? " 2>&1" : " 2>/dev/null");
     std::string out;
     int status = -1;
     if (FILE* pipe = ::popen(command.c_str(), "r")) {
@@ -139,15 +145,49 @@ void Workspaces::open(sq::messaging::Telegraph& t, std::string path) {
         ran += ", ";
     }
     const std::string args = "--workspace " + shell_quoted(path) + " info";
-    ran += json_string("square " + args) + "]";
+    ran += json_string("square " + args);
     const auto [status, out] = square("--json " + args);
     if (status != 0) {
-        publish(t, addresses::home, "{\"error\": " + json_string(out) + ", \"ran\": " + ran + "}");
-    } else {
-        publish(
-            t, addresses::home,
-            "{\"path\": " + json_string(path) + ", \"info\": " + out + ", \"ran\": " + ran + "}");
+        publish(t, addresses::home, "{\"error\": " + json_string(out) + ", \"ran\": " + ran + "]}");
+        find(t);
+        return;
     }
+    // What its build can do: sqmake's verbs (build always; run, test,
+    // install as the build file says) and the actions it names.
+    const std::string request =
+        R"({"sq": 1, "command": "plan", "args": {"dir": )" + json_string(path) + "}}";
+    const std::string asked = places_.tmp + "/sqide-plan.json";
+    if (std::ofstream file(asked, std::ios::trunc); file) {
+        file << request;
+    }
+    const auto [planned, plan] = run("sqmake", "call < " + shell_quoted(asked), false);
+    ran += ", " + json_string("sqmake call (plan)") + "]";
+    std::string verbs = "[]";
+    std::string actions = "[]";
+    if (const auto p = sq::data::parse_json(plan); planned == 0 && p) {
+        const sq::data::JsonValue* result = p.value.find("result");
+        const sq::data::JsonValue& r = result != nullptr ? *result : p.value;
+        if (const sq::data::JsonValue* v = r.find("verbs");
+            v != nullptr && v->array_if() != nullptr) {
+            verbs = "[";
+            for (const auto& name : *v->array_if()) {
+                verbs += (verbs.size() > 1 ? ", " : "") + json_string(text_of(&name));
+            }
+            verbs += "]";
+        }
+        if (const sq::data::JsonValue* a = r.find("actions");
+            a != nullptr && a->array_if() != nullptr) {
+            actions = "[";
+            for (const auto& action : *a->array_if()) {
+                actions +=
+                    (actions.size() > 1 ? ", " : "") + json_string(text_of(action.find("name")));
+            }
+            actions += "]";
+        }
+    }
+    publish(t, addresses::home,
+            "{\"path\": " + json_string(path) + ", \"info\": " + out + ", \"verbs\": " + verbs +
+                ", \"actions\": " + actions + ", \"ran\": " + ran + "}");
     find(t);  // the cards: a .sq exploded is a folder now too
 }
 

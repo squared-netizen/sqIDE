@@ -5,6 +5,7 @@
 //   :workspaces  the Workspaces screen, and the model's part that knows them
 //   :home        the open workspace's Home
 //   :wizard      New: a template, its name and options, then sqpg new
+//   :runner      the model's part that runs a build without holding it up
 //
 // This file is sqIDE's own (sqterm has none of it).
 
@@ -14,3 +15,4 @@ export import :ui;
 export import :workspaces;
 export import :home;
 export import :wizard;
+export import :runner;

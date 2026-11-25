@@ -8,13 +8,16 @@
 // squared_main runs once, when the first window is up:
 //
 //   - the model: one, made of parts (sq::messaging::Composite, squared
-//     1.2.0): sqterm's Shell (the shell in a pty), and sqIDE's Workspaces
-//     (square's answers: the cards, and opening one), each on the model's thread;
+//     1.2.0): sqterm's Shell (the shell in a pty), sqIDE's Workspaces
+//     (square's and sqpg's answers: the cards, opening one, making one) and
+//     its Runner (a build, its output watched as the pty is), each on the
+//     model's thread;
 //   - the screens: Workspaces, the root (the cards; a tap has the model open
-//     one), the open workspace's Home over it, and sqterm's terminal over
-//     that, when asked for (the terminal is optional: nothing needs it);
+//     one), New (the wizard) or the open workspace's Home over it, and
+//     sqterm's terminal over that, when asked for (the terminal is optional:
+//     nothing needs it);
 //   - the drawers: on sqIDE's own screens, the left one moves between screens
-//     and the right one has the screen's own (ide/ui.hpp); the terminal's
+//     and the right one has the screen's own (ide/ui.cppm); the terminal's
 //     drawer has the same screens;
 //   - the background notice, as sqterm's: the shell keeps running.
 //
@@ -56,8 +59,8 @@ std::unique_ptr<sq::gui::Widget> make_terminal(sq::Stage& stage) {
 
 namespace {
 
-/// sqIDE's model: the shell, and what knows the workspaces.
-using Model = sq::messaging::Composite<sqterm::Shell, sqide::Workspaces>;
+/// sqIDE's model: the shell, what knows the workspaces, and what runs a build.
+using Model = sq::messaging::Composite<sqterm::Shell, sqide::Workspaces, sqide::Runner>;
 
 }  // namespace
 
@@ -76,7 +79,8 @@ void squared_main(sq::App& app) {
     }
     sqterm::Places for_workspaces = places;
     for_workspaces.staged.clear();  // the Shell unpacks them; the cards need only where
-    app.run<Model>(std::move(places), std::move(for_workspaces));
+    sqterm::Places for_runner = for_workspaces;
+    app.run<Model>(std::move(places), std::move(for_workspaces), std::move(for_runner));
     static_cast<void>(app.keep_running({.title = sqterm::app_name, .text = "1 session"}));
 
     sqterm::set_drawer({.title = std::string(sqterm::app_name), .buttons = sqide::screens()});
