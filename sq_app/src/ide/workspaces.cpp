@@ -36,7 +36,7 @@ constexpr float drag_slop = 10.0F;
 }
 
 /// `s` in single quotes for the shell, each ' as '\''.
-[[nodiscard]] std::string quoted(std::string_view s) {
+[[nodiscard]] std::string shell_quoted(std::string_view s) {
     std::string out = "'";
     for (const char c : s) {
         out += c == '\'' ? std::string("'\\''") : std::string(1, c);
@@ -69,7 +69,7 @@ void Workspaces::find(sq::messaging::Telegraph& t) {
     // square from the prefix, as the shell would run it; its JSON as it is.
     const std::string square = places_.prefix + "/bin/square";
     const std::string command =
-        quoted(square) + " --json find " + quoted(places_.home) + " 2>/dev/null";
+        shell_quoted(square) + " --json find " + shell_quoted(places_.home) + " 2>/dev/null";
     std::string out;
     if (FILE* pipe = ::popen(command.c_str(), "r")) {
         std::array<char, 4096> buffer{};
@@ -81,15 +81,14 @@ void Workspaces::find(sq::messaging::Telegraph& t) {
         }
     }
     if (out.empty()) {
-        out = R"({"error": "square found nothing (is it installed? pkg install square)"
-    })";
-}
-const std::span<std::byte> room = t.snapshot(addresses::cards, out.size());
-if (room.size() < out.size()) {
-    return;
-}
-std::memcpy(room.data(), out.data(), out.size());
-static_cast<void>(t.publish(addresses::cards, out.size()));
+        out = "{\"error\": \"square found nothing (is it installed? pkg install square)\"}";
+    }
+    const std::span<std::byte> room = t.snapshot(addresses::cards, out.size());
+    if (room.size() < out.size()) {
+        return;
+    }
+    std::memcpy(room.data(), out.data(), out.size());
+    static_cast<void>(t.publish(addresses::cards, out.size()));
 }
 
 // ---- the widget ---------------------------------------------------------------------------------
@@ -277,10 +276,10 @@ void WorkspacesView::tap(Target target) {
                 // Always exploded to work on (docs/design.md): beside home's others.
                 const std::size_t dot = c.id.rfind('.');
                 const std::string name = dot == std::string::npos ? c.id : c.id.substr(dot + 1);
-                to_terminal("square explode " + quoted(c.path) + " ~ && cd ~/" + quoted(name) +
-                            " && clear\r");
+                to_terminal("square explode " + shell_quoted(c.path) + " ~ && cd ~/" +
+                            shell_quoted(name) + " && clear\r");
             } else {
-                to_terminal("cd " + quoted(c.path) + " && clear\r");
+                to_terminal("cd " + shell_quoted(c.path) + " && clear\r");
             }
             break;
         }
