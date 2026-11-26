@@ -18,8 +18,11 @@ app = {
   background = true,
   -- pkg's, built by packages/pkg/recipe.sh with sqcart's reader; the app
   -- does not call it.
-  exclude = {"sq_app/src/unpack_cartridge.cpp"},
-  -- zstd's decoder, for the packages (12.5).
+  -- zstd's decoder, sq_app/third_party/zstd's (pkg's too), is not
+  -- compiled here: Settings' preferences link squared's whole zstd (the
+  -- same 1.5.7, for their export), which decodes the packages as well.
+  exclude = {"sq_app/src/unpack_cartridge.cpp", "sq_app/third_party/zstd/zstddeclib.c"},
+  -- zstd's header, for the packages (12.5).
   flags = {"-Isq_app/third_party/zstd"},
   -- The model's snapshots: the Shell's 2, Workspaces' 4 and the Runner's 1
   -- (sq_app/src/ide); squared's default is 4, and past it one is not published.
